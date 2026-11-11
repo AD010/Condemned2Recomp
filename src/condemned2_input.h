@@ -13,6 +13,7 @@
 #include <string>
 #include <functional>
 #include <initializer_list>
+#include <vector>
 
 #include <imgui.h>
 #include <imgui_internal.h>
@@ -59,6 +60,7 @@ namespace rex::input::condemned2input{
          void OnWindowAvailable(rex::ui::Window* window) override;
          void PCControls();
          uint32_t GetInputManager();
+         bool IsNativeCommandEnabled(uint32_t action);
 
          bool IsAnyDialogOpen();
          std::unordered_map<std::string, ImGuiWindow*> GetActiveWindows() { return activeWindows; }
@@ -115,22 +117,22 @@ namespace rex::input::condemned2input{
          MouseLookType mouseLookType;
          bool isDialogOpen = true;
          bool isInMenu = false;
-         bool isTuning; //Hey, wanna listen to some tunes?
+         bool isTuning = false; //Hey, wanna listen to some tunes?
          bool isUsingPCControls = true;
          bool isDebugging = false;
          bool isDebuggingFrames = false;
-         double last_dx;
-         double last_dy;
-         double last_add_dx;
-         double last_add_dy;
-         float wheelY;
+         double last_dx = 0;
+         double last_dy = 0;
+         double last_add_dx = 0;
+         double last_add_dy = 0;
+         float wheelY = 0;
 
          //Custom input
          bool isUsingCRT = false;
          bool blockFirstFrame = false;
          bool hasMeleeWeapon = false;
-         double move_dx;
-         double move_dy;
+         double move_dx = 0;
+         double move_dy = 0;
          MouseBind mouse_clicks;
          std::unordered_map<std::string, Bind> activeBinds;
          std::vector<int32_t> activeNativeKeys;
