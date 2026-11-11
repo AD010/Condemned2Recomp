@@ -359,11 +359,14 @@ namespace rex::input::condemned2input {
     last_add_dx = std::clamp(last_add_dx, -1.0, 1.0);
     last_add_dy = std::clamp(last_add_dy, -1.0, 1.0);
 
+    // Only arrow keys and mouse wheel control navigation / forensic choices.
+    // WASD movement MUST NOT inject menu commands (0x82..0x8e) in gameplay,
+    // otherwise changing direction can alter the active forensic command state.
     // Navigation
-    Held({activeBinds["menu_nav_up"], activeBinds["condemned2_input_move_forward"]}, {0x82}, wheelY > 0.0f);
-    Held({activeBinds["menu_nav_down"], activeBinds["condemned2_input_move_backward"]}, {0x83}, wheelY < 0.0f);
-    Held({activeBinds["menu_nav_right"], activeBinds["condemned2_input_move_right"]}, {0x85, 0x8e} );
-    Held({activeBinds["menu_nav_left"], activeBinds["condemned2_input_move_left"]}, {0x84, 0x8d} );
+    Held({activeBinds["menu_nav_up"]}, {0x82}, wheelY > 0.0f);
+    Held({activeBinds["menu_nav_down"]}, {0x83}, wheelY < 0.0f);
+    Held({activeBinds["menu_nav_right"]}, {0x85, 0x8e} );
+    Held({activeBinds["menu_nav_left"]}, {0x84, 0x8d} );
 
     //Confirm, Use Commands
     if(IsInMenu()){
@@ -433,8 +436,7 @@ namespace rex::input::condemned2input {
     }
     if(IsDown(activeBinds["condemned2_input_hook_attacks"])){
       NativeKeyPress({0x42, 0xa8});
-      // CS_Grab/CS_DoubleGrab (0x40) is separately enabled by the guest
-      // in grab/finisher contexts. Keep the established Q bind.
+      // CS_Grab / CS_DoubleGrab: only in contexts where the guest enables it.
       if (IsNativeCommandEnabled(0x40))
         NativeKeyPress({0x40});
     }
@@ -444,6 +446,12 @@ namespace rex::input::condemned2input {
     if(Pressed(activeBinds["condemned2_input_slowmo"]) ){
       _hooks->SendCommandCmd({_hooks->AllocateHeapForString("msg Player (slowmo on default)"), 0, 0, 0});
     } 
+
+    // Contextual grab/finisher can also be triggered with the standard E key;
+    // the game chooses the enabled action, while a single mapped key remains
+    // usable for pickup and scripted quick-time interactions.
+    if (IsDown(activeBinds["condemned2_input_use"]) && IsNativeCommandEnabled(0x40))
+      NativeKeyPress({0x40});
 
     Held({activeBinds["condemned2_input_objectives"]}, {0x4f, 0x4e} );
     Held({activeBinds["condemned2_input_forensics"]}, {0x74, 0x71} );
@@ -677,6 +685,23 @@ namespace rex::input::condemned2input {
     if (g_condemned2_input_driver->GetMouseLookType() == MouseLookType::DISABLED  // No changes if disabled.
     || !g_condemned2_input_driver->IsUsingPCControls() ) // Are using the gamepad?
       return 0;
+
+    // v0.2.1 received both keyboard edge events and button polling from the
+    // SDK's MnkInputDriver. The v0.6 native input driver only injected events,
+    // so the original Input_GetButton path never saw E / scripted grabs.
+    // Return digital button levels for the same guest commands as key events.
+    if (btn == 0x57) {
+      return g_condemned2_input_driver->IsNativeCommandEnabled(0x57) &&
+        g_condemned2_input_driver->IsDown(
+          g_condemned2_input_driver->GetActiveBinds().at("condemned2_input_use"));
+    }
+    if (btn == 0x40) {
+      return g_condemned2_input_driver->IsNativeCommandEnabled(0x40) &&
+        (g_condemned2_input_driver->IsDown(
+           g_condemned2_input_driver->GetActiveBinds().at("condemned2_input_use")) ||
+         g_condemned2_input_driver->IsDown(
+           g_condemned2_input_driver->GetActiveBinds().at("condemned2_input_hook_attacks")));
+    }
 
     //Sprint
     if( btn == 0x10 && g_condemned2_input_driver->GetActiveBinds()["condemned2_input_sprint"].prev){
