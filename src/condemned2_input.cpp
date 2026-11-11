@@ -459,8 +459,8 @@ namespace rex::input::condemned2input {
     // command-set checks they also fire during melee, weapon pickup and QTE,
     // even when forensic-camera mode is inactive. These overlapping controls
     // must not inject camera actions into ordinary gameplay.
-    if (IsNativeCommandEnabled(0xb9) &&
-        Pressed(activeBinds["condemned2_input_tool_take_picture"])) {
+    const bool cameraShutterPressed = Pressed(activeBinds["condemned2_input_tool_take_picture"]);
+    if (cameraShutterPressed && IsNativeCommandEnabled(0xb9)) {
       NativeKeyPress({0xb9});
     }
     if (IsNativeCommandEnabled(0x8b) &&
