@@ -59,7 +59,7 @@ if (!(Test-Path (Join-Path $SourceRoot 'condemned2recomp_manifest.toml'))) {
 Write-Host '=== Verify Win64 clang toolchain ==='
 $clangVersion = (& clang++ --version | Select-Object -First 1)
 Write-Host $clangVersion
-if ($LASTEXITCODE -ne 0 -or $clangVersion -notmatch 'version\\s+(\\d+)\\.') {
+if ($LASTEXITCODE -ne 0 -or $clangVersion -notmatch 'version\s+(\d+)\.') {
     throw 'Cannot establish the installed Clang version'
 }
 if ([int]$Matches[1] -lt 20) { throw 'Requires LLVM/Clang 20 or later' }
@@ -144,7 +144,15 @@ try {
     if (-not @($check.Entries | Where-Object FullName -eq 'condemned2recomp.exe').Count) {
         throw 'Compiled EXE not present in ZIP'
     }
-    if (@($check.Entries | Where-Object { $_.FullName -match '(?i)\\.(xex|xexp|iso)$' }).Count) {
+    if (@($check.Entries | Where-Object { $_.FullName -match '(?i)\.(xex|xexp|iso) }).Count) {
+        throw 'Private game inputs detected in artifact'
+    }
+}
+finally { $check.Dispose() }
+Write-Host '=== SUCCESS: true-source Windows x64 build archived ==='
+Write-Host ((Get-FileHash $zipOut -Algorithm SHA256).Hash)
+Write-Host $zipOut
+ }).Count) {
         throw 'Private game inputs detected in artifact'
     }
 }
