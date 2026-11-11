@@ -11,6 +11,27 @@ if(NOT REXSDK_DIR AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/thirdparty/rexglue-sdk
     set(REXSDK_DIR "${CMAKE_CURRENT_SOURCE_DIR}/thirdparty/rexglue-sdk" CACHE PATH "ReXGlue SDK source directory")
 endif()
 
+# On some Windows git checkouts libmspack symlink files are checked out
+# as tiny text stubs rather than symlinks. Restore them only when a matching
+# relative source is present; otherwise leave them untouched.
+if(WIN32 AND REXSDK_DIR)
+    file(GLOB _mspack_files "${REXSDK_DIR}/thirdparty/libmspack/cabextract/mspack/*")
+    foreach(_f IN LISTS _mspack_files)
+        if(IS_DIRECTORY "${_f}")
+            continue()
+        endif()
+        file(SIZE "${_f}" _size)
+        if(_size LESS 256)
+            file(READ "${_f}" _content)
+            string(STRIP "${_content}" _target)
+            get_filename_component(_dir "${_f}" DIRECTORY)
+            if(_target MATCHES "^\\.\\./.*mspack/" AND EXISTS "${_dir}/${_target}")
+                file(COPY_FILE "${_dir}/${_target}" "${_f}" ONLY_IF_DIFFERENT)
+            endif()
+        endif()
+    endforeach()
+endif()
+
 include(FetchContent)
 include("${CMAKE_CURRENT_SOURCE_DIR}/generated/rexglue.cmake")
 
