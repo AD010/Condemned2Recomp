@@ -297,6 +297,26 @@ namespace rex::input::condemned2input {
 
     // Dispatch once per device update so hold/release transitions cannot latch.
     FlushNativeKeys();
+    if (!isDialogOpen) {
+      // Only log transitions: do not flood a gameplay session with per-frame
+      // hook traces. This distinguishes input-state loss from missing UI art.
+      const uint32_t state =
+          (IsInMenu() ? 1u : 0u) |
+          (IsNativeCommandEnabled(0x57) ? 2u : 0u) |
+          (IsNativeCommandEnabled(0x40) ? 4u : 0u) |
+          (IsNativeCommandEnabled(0x70) ? 8u : 0u) |
+          (IsNativeBindDown("condemned2_input_use") ? 16u : 0u) |
+          (IsNativeBindDown("condemned2_input_forensics") ? 32u : 0u) |
+          ((mouse_clicks.isMouseLeft && mouse_clicks.isMouseRight) ? 64u : 0u);
+      if (!actionStateSnapshotInitialized_ || state != actionStateSnapshot_) {
+        REXLOG_INFO("[c2-input-state] hud={} use57={} grab40={} forensicReturn70={} keyUse={} keyTools={} dualTrigger={}",
+                    (state & 1u)!=0, (state & 2u)!=0, (state & 4u)!=0,
+                    (state & 8u)!=0, (state & 16u)!=0, (state & 32u)!=0,
+                    (state & 64u)!=0);
+        actionStateSnapshot_ = state;
+        actionStateSnapshotInitialized_ = true;
+      }
+    }
 
     //Update controller
     packet_number_++; // Increment input packet number
@@ -336,16 +356,25 @@ namespace rex::input::condemned2input {
       !hasMeleeWeapon ? isMouseRightPressed : isMouseLeftPressed, 
       !hasMeleeWeapon ? isMouseLeftPressed : isMouseRightPressed 
     };
-    if(mouse_clicks.isMouseLeftPressed){
+    // The gamepad sends trigger DOWN, HOLD, and UP. Sending only a one-frame
+    // mouse click prevents its dual-trigger (LT+RT) grab/finisher path from
+    // seeing both triggers held together.
+    if(mouse_clicks.isMouseLeft){
       NativeKeyPress({0x47, 0x79, 0x1c});
     }
+    if(mouse_clicks.isMouseRight){
+      NativeKeyPress({0x11, 0x7a});
+    }
     if(mouse_clicks.isMouseRightPressed){
-      NativeKeyPress({0x11, 0x7a, 0xbc});
-      // 0x65 cancels the active forensic task. Never inject it merely because
-      // the right mouse button was clicked unless the guest enables this action.
+      NativeKeyPress({0xbc}); // NoteInputTime is an edge, not a held trigger.
+      // Only the active forensic task may accept CancelTask.
       if (IsNativeCommandEnabled(0x65))
         NativeKeyPress({0x65});
     }
+    // Real Xbox finisher: LT+RT together. Expose it for keyboard/mouse as
+    // simultaneous LMB+RMB; preserve E/Q as optional contextual aliases.
+    if (isMouseLeft && isMouseRight && IsNativeCommandEnabled(0x40))
+      NativeKeyPress({0x40});
     //Mouse movement
     float dx = 0.0f, dy = 0.0f;
     SDL_GetRelativeMouseState(&dx, &dy);
@@ -369,7 +398,10 @@ namespace rex::input::condemned2input {
     Held({activeBinds["menu_nav_left"]}, {0x84, 0x8d} );
 
     //Confirm, Use Commands
-    if(IsInMenu()){
+    // HUD / forensic overlays are not proof that world interactions are off.
+    // In particular, IsInMenu() may remain true after a tool-wheel transition.
+    const bool hudOrMenu = IsInMenu();
+    if(hudOrMenu){
       if(Pressed(activeBinds["condemned2_input_use"]) || Pressed(activeBinds["menu_enter"])){ //buttons |= X_INPUT_GAMEPAD_B;
         NativeKeyPress({
           //Submit menu confirm
@@ -401,10 +433,13 @@ namespace rex::input::condemned2input {
           0x5d // Choose investigation choice
         });
       }
-      //Player use action
-      Held({activeBinds["condemned2_input_use"], activeBinds["menu_enter"]}, {0x57} );
     }
-    
+    // The game's command set decides whether world Use (0x57) is valid.
+    // Always maintain its DOWN/HOLD/UP lifecycle, even while the HUD, GPS or
+    // forensic UI reports a menu state. Otherwise A works for health packs
+    // and doors, but weapon pickup and scripted finishers never see Use.
+    Held({activeBinds["condemned2_input_use"], activeBinds["menu_enter"]}, {0x57} );
+
     //Menu back
     if(Pressed(activeBinds["menu_go_back"])){ //buttons |= X_INPUT_GAMEPAD_B;
       NativeKeyPress({0x88, 0xba}); // menu back; dismiss tutorial
@@ -454,7 +489,18 @@ namespace rex::input::condemned2input {
       NativeKeyPress({0x40});
 
     Held({activeBinds["condemned2_input_objectives"]}, {0x4f, 0x4e} );
+    // 0x70 is the original ForensicsReturn command when the tool selector
+    // closes. The quick-select keys bypass the controller's ordinary exit
+    // transition; make that transition explicit on the next input update.
+    if (pendingForensicsReturn_ && !IsNativeBindDown("condemned2_input_forensics")) {
+      NativeKeyPress({0x70});
+      pendingForensicsReturn_ = false;
+    }
+    const bool forensicWasDown = activeBinds["condemned2_input_forensics"].prev;
     Held({activeBinds["condemned2_input_forensics"]}, {0x74, 0x71} );
+    if (forensicWasDown && !IsNativeBindDown("condemned2_input_forensics")) {
+      pendingForensicsReturn_ = true;
+    }
     // The camera shutter defaults to Mouse1,E, and zoom to Mouse2,V. Without
     // command-set checks they also fire during melee, weapon pickup and QTE,
     // even when forensic-camera mode is inactive. These overlapping controls
@@ -471,15 +517,19 @@ namespace rex::input::condemned2input {
     // Quick-swap (Custom controls)
     if(Pressed(activeBinds["condemned2_input_tool_uv"])){
       NativeKeyPress({0x71,0x90,0x96,0xa0});
+      pendingForensicsReturn_ = true;
     }
     if(Pressed(activeBinds["condemned2_input_tool_camera"])){
       NativeKeyPress({0x71,0x98,0x9e,0xa0});
+      pendingForensicsReturn_ = true;
     }
     if(Pressed(activeBinds["condemned2_input_tool_spectrometer"])){
       NativeKeyPress({0x74,0x71,0x97,0xa1});
+      pendingForensicsReturn_ = true;
     }
     if(Pressed(activeBinds["condemned2_input_tool_gps"])){
       NativeKeyPress({0x74,0x71,0x99,0x9f});
+      pendingForensicsReturn_ = true;
     }
     g_condemned2_input_driver->SetMouseWheelY(0); //Reset wheel after a frame.
   }
@@ -707,8 +757,10 @@ namespace rex::input::condemned2input {
         g_condemned2_input_driver->IsNativeBindDown("condemned2_input_use");
     }
     if (btn == 0x40) {
+      const MouseBind triggers = g_condemned2_input_driver->MouseClick();
       return g_condemned2_input_driver->IsNativeCommandEnabled(0x40) &&
-        (g_condemned2_input_driver->IsNativeBindDown("condemned2_input_use") ||
+        ((triggers.isMouseLeft && triggers.isMouseRight) ||
+         g_condemned2_input_driver->IsNativeBindDown("condemned2_input_use") ||
          g_condemned2_input_driver->IsNativeBindDown("condemned2_input_hook_attacks"));
     }
 
