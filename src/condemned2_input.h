@@ -119,6 +119,9 @@ namespace rex::input::condemned2input{
          bool isDialogOpen = true;
          bool isInMenu = false;
          bool isTuning = false; //Hey, wanna listen to some tunes?
+         bool pendingForensicsReturn_ = false;
+         bool actionStateSnapshotInitialized_ = false;
+         uint32_t actionStateSnapshot_ = 0;
          bool isUsingPCControls = true;
          bool isDebugging = false;
          bool isDebuggingFrames = false;
