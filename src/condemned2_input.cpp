@@ -84,6 +84,7 @@ REX_EXTERN(__imp__IsMeleeWeapon); // Checks if player's current weapon is a mele
 REX_IMPORT(Input_KeyDown, PressBind, uint32_t(uint32_t, uint32_t));
 REX_IMPORT(Input_KeyHold, HoldBind, uint32_t(uint32_t, uint32_t));
 REX_IMPORT(Input_KeyUp, ReleaseBind, uint32_t(uint32_t, uint32_t));
+REX_IMPORT(Input_IsCommandEnabled, IsCommandEnabled, uint32_t(uint32_t, uint32_t));
 
 namespace rex::input::condemned2input {
   namespace {constexpr rex::input::DeviceId kDevice = static_cast<rex::input::DeviceId>(0x4E4F5000); constexpr uint32_t kInputManager = 0x4005ae70; constexpr uint32_t kInputManagerCRT = 0x200afcc0;}
@@ -339,10 +340,11 @@ namespace rex::input::condemned2input {
       NativeKeyPress({0x47, 0x79, 0x1c});
     }
     if(mouse_clicks.isMouseRightPressed){
-      NativeKeyPress({
-        0x11, 0x7a, 0xbc, 
-        0x65 // Cancel investigation
-      });
+      NativeKeyPress({0x11, 0x7a, 0xbc});
+      // 0x65 cancels the active forensic task. Never inject it merely because
+      // the right mouse button was clicked unless the guest enables this action.
+      if (IsNativeCommandEnabled(0x65))
+        NativeKeyPress({0x65});
     }
     //Mouse movement
     float dx = 0.0f, dy = 0.0f;
@@ -402,11 +404,9 @@ namespace rex::input::condemned2input {
     
     //Menu back
     if(Pressed(activeBinds["menu_go_back"])){ //buttons |= X_INPUT_GAMEPAD_B;
-      NativeKeyPress({
-        0x88,
-        0xba, // Close tutorial dialogs
-        0x65 // Cancel investigation
-      });
+      NativeKeyPress({0x88, 0xba}); // menu back; dismiss tutorial
+      if (IsNativeCommandEnabled(0x65)) // cancel only a currently enabled task
+        NativeKeyPress({0x65});
     }
 
     //Actions
@@ -433,6 +433,10 @@ namespace rex::input::condemned2input {
     }
     if(IsDown(activeBinds["condemned2_input_hook_attacks"])){
       NativeKeyPress({0x42, 0xa8});
+      // CS_Grab/CS_DoubleGrab (0x40) is separately enabled by the guest
+      // in grab/finisher contexts. Keep the established Q bind.
+      if (IsNativeCommandEnabled(0x40))
+        NativeKeyPress({0x40});
     }
     if(!IsDown(activeBinds["condemned2_input_slowmo"]) && activeBinds["condemned2_input_slowmo"].prev){
       _hooks->SendCommandCmd({_hooks->AllocateHeapForString("msg Player (slowmo off)"), 0, 0, 0});
@@ -558,6 +562,10 @@ namespace rex::input::condemned2input {
     requestedNativeKeys.clear();
   }
   
+  bool Condemned2InputDriver::IsNativeCommandEnabled(uint32_t action) {
+    return (IsCommandEnabled(GetInputManager(), action) & 0xff) != 0;
+  }
+
   uint32_t Condemned2InputDriver::GetInputManager(){
     if(isUsingCRT){
       return kInputManagerCRT;
@@ -617,8 +625,10 @@ namespace rex::input::condemned2input {
     }
     else if (btn == 0x79 || btn == 0x47){ // Left click
       return mouseClick.isMouseLeft;
-    }else if (btn == 0x7a || btn == 0x65){ // Right click
+    }else if (btn == 0x7a){ // Right click / combo button
       return mouseClick.isMouseRight;
+    }else if (btn == 0x65){ // CancelTask only if the guest explicitly enables it
+      return g_condemned2_input_driver->IsNativeCommandEnabled(0x65) && mouseClick.isMouseRight;
     }
 
     // Radio/TV Antenna Tuning
@@ -684,7 +694,11 @@ namespace rex::input::condemned2input {
     if(g_condemned2_input_driver->IsUsingMeleeWeapon()){ //Alt block
       isMiddleClicked = mouseClick.isMouseMiddle;
     }
-    if (btn == 0x11 || btn == 0x65 || btn == 0x7a ) {
+    if (btn == 0x65) {
+      return g_condemned2_input_driver->IsNativeCommandEnabled(0x65)
+        && (mouseClick.isMouseRight || mouseClick.isMouseRightPressed);
+    }
+    if (btn == 0x11 || btn == 0x7a ) {
       return mouseClick.isMouseRight || mouseClick.isMouseRightPressed || isMiddleClicked;
     }else if(btn == 0x1c || btn == 0x47 || btn == 0x79){ 
       return mouseClick.isMouseLeft || mouseClick.isMouseLeftPressed || isMiddleClicked;
