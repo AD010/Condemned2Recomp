@@ -455,10 +455,16 @@ namespace rex::input::condemned2input {
 
     Held({activeBinds["condemned2_input_objectives"]}, {0x4f, 0x4e} );
     Held({activeBinds["condemned2_input_forensics"]}, {0x74, 0x71} );
-    if(Pressed(activeBinds["condemned2_input_tool_take_picture"])){
+    // The camera shutter defaults to Mouse1,E, and zoom to Mouse2,V. Without
+    // command-set checks they also fire during melee, weapon pickup and QTE,
+    // even when forensic-camera mode is inactive. These overlapping controls
+    // must not inject camera actions into ordinary gameplay.
+    if (IsNativeCommandEnabled(0xb9) &&
+        Pressed(activeBinds["condemned2_input_tool_take_picture"])) {
       NativeKeyPress({0xb9});
     }
-    if(IsDown(activeBinds["condemned2_input_zoom"])){
+    if (IsNativeCommandEnabled(0x8b) &&
+        IsDown(activeBinds["condemned2_input_zoom"])) {
       NativeKeyPress({0x8b});
     }
 
