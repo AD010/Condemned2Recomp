@@ -68,7 +68,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: Condemned2Recomp-0.6.0-InputState-V3-Windows-x64
-          path: Condemned2Recomp-0.6.0-InputState-V2-Windows-x64.zip
+          path: Condemned2Recomp-0.6.0-InputState-V3-Windows-x64.zip
           if-no-files-found: error
           compression-level: 0
           retention-days: 30
