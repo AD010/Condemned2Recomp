@@ -1,0 +1,68 @@
+# Template to be installed as .github/workflows/build.yml in the
+# user's PRIVATE AD010/Condemned2-CI-Inputs repository.
+# Its own GITHUB_TOKEN can read the private ZIP: no PAT, no repo secrets.
+# Never commit game XEX/XEXP to the public source fork.
+name: Condemned 2 TRUE Recomp Windows x64 Release
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+    paths:
+      - 'Condemned2_Private_CI_Inputs.zip'
+      - '.github/workflows/build.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  source-win64:
+    runs-on: windows-2022
+    timeout-minutes: 180
+    defaults:
+      run:
+        shell: pwsh
+    steps:
+      - name: Checkout private build inputs
+        uses: actions/checkout@v4
+        with:
+          path: private-inputs
+          persist-credentials: false
+
+      - name: Checkout PUBLIC corrected source and ReXGlue submodule
+        uses: actions/checkout@v4
+        with:
+          repository: AD010/Condemned2Recomp
+          ref: fix/input-weapon-pickup-qte-060
+          path: src
+          submodules: recursive
+          persist-credentials: false
+
+      - name: Initialize Visual Studio 2022 x64 build tools
+        uses: ilammy/msvc-dev-cmd@v1
+        with:
+          arch: amd64
+
+      - name: Actual XEX codegen and native Windows x64 Release compile
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $source = Join-Path $env:GITHUB_WORKSPACE 'src'
+          $inputZip = Join-Path $env:GITHUB_WORKSPACE 'private-inputs/Condemned2_Private_CI_Inputs.zip'
+          $artifacts = Join-Path $env:GITHUB_WORKSPACE 'release-output'
+          & (Join-Path $source 'ci/build_true_win64_release.ps1') -SourceRoot $source -InputZip $inputZip -OutputDir $artifacts
+          if ($LASTEXITCODE -ne 0) { throw 'Real native recompilation failed' }
+
+      - name: Verify Windows accepts the new EXE (suspended CreateProcess)
+        run: |
+          $archive = Join-Path $env:GITHUB_WORKSPACE 'release-output/Condemned2Recomp-RealSource-InputFix-Windows-x64.zip'
+          python src/ci/smoke_windows_pe_loader.py --archive $archive
+          if ($LASTEXITCODE -ne 0) { throw 'Compiled EXE Windows loader test failed' }
+
+      - name: Publish freshly compiled standalone Windows ZIP
+        uses: actions/upload-artifact@v4
+        with:
+          name: Condemned2Recomp-RealSource-InputFix-Windows-x64
+          path: release-output/Condemned2Recomp-RealSource-InputFix-Windows-x64.zip
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 30
