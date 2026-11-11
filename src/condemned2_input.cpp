@@ -68,6 +68,9 @@ REXCVAR_DEFINE_DOUBLE(condemned2_input_mouse_sensitivity, 0.075, "Condemned 2/In
 
 REXCVAR_DEFINE_BOOL(condemned2_input_debug, false, "Condemned 2/Debug", "Toggle logging for all input.");
 REXCVAR_DEFINE_BOOL(condemned2_input_frame_debug, false, "Condemned 2/Debug", "Toggle logging for input per frame.");
+// Log only player interaction transitions; this distinguishes injected input
+// from gameplay command dispatch and avoids huge per-frame trace files.
+REXCVAR_DEFINE_BOOL(condemned2_input_trace_use_grab, true, "Condemned 2/Debug", "Log use/grab guest input dispatch for missing pickup prompt investigation.");
 // Native action commands handle keyboard/mouse interaction directly.
 // Do not inject synthetic gamepad A/LT/RT: the regression in log 030 showed
 // that this removed working health-pack pickup without restoring grabs.
@@ -632,12 +635,18 @@ namespace rex::input::condemned2input {
     const uint32_t keyManager = GetInputManager();
     // Release keys absent from this update, including forensic tools and one-shot taps.
     for (int32_t key : activeNativeKeys) {
-      if (std::find(requestedNativeKeys.begin(), requestedNativeKeys.end(), key) == requestedNativeKeys.end())
+      if (std::find(requestedNativeKeys.begin(), requestedNativeKeys.end(), key) == requestedNativeKeys.end()) {
+        if (REXCVAR_GET(condemned2_input_trace_use_grab) && (key == 0x57 || key == 0x40))
+          REXLOG_INFO("[c2-native-action] UP id={:#x}", key);
         ReleaseBind(keyManager, key);
+      }
     }
     for (int32_t key : requestedNativeKeys) {
-      if (std::find(activeNativeKeys.begin(), activeNativeKeys.end(), key) == activeNativeKeys.end())
+      if (std::find(activeNativeKeys.begin(), activeNativeKeys.end(), key) == activeNativeKeys.end()) {
+        if (REXCVAR_GET(condemned2_input_trace_use_grab) && (key == 0x57 || key == 0x40))
+          REXLOG_INFO("[c2-native-action] DOWN id={:#x} enabled_hint={}", key, IsNativeCommandEnabled(key));
         PressBind(keyManager, key);
+      }
       HoldBind(keyManager, key);
     }
     activeNativeKeys.swap(requestedNativeKeys);
@@ -844,19 +853,27 @@ namespace rex::input::condemned2input {
     uint32_t temp = ctx.r3.u32;
     uint32_t tempB = ctx.r4.u32;
     __imp__Input_GetButton(ctx, base);
+    const uint32_t originalValue = ctx.r3.u32;
     double newValue = GetButtonOverrideValue(tempB);
     if(newValue != 0){
-      ctx.r3.u64 = newValue;
+      ctx.r3.u64 = static_cast<uint64_t>(newValue);
+      if (REXCVAR_GET(condemned2_input_trace_use_grab) &&
+          (tempB == 0x57 || tempB == 0x40))
+        REXLOG_INFO("[c2-poll-action] id={:#x} original={} override={}", tempB, originalValue, ctx.r3.u32);
     }
     if(g_condemned2_input_driver->IsDebuggingFrames()){
       REXLOG_INFO("[condemned2_input][Input_GetButton] {:#x} {:#x} {:#x} {}", temp, tempB, ctx.lr, ctx.r3.u64);
     }
   }
   REX_HOOK_RAW(Input_PlayerInput){
+    const uint32_t id = ctx.r4.u32;
     if(g_condemned2_input_driver->IsDebugging()){
-      REXLOG_INFO("[condemned2_input][Input_PlayerInput] {:#x} {:#x}", ctx.r3.u64, ctx.r4.u32);
+      REXLOG_INFO("[condemned2_input][Input_PlayerInput] {:#x} {:#x}", ctx.r3.u64, id);
     }
     __imp__Input_PlayerInput(ctx, base);
+    if (REXCVAR_GET(condemned2_input_trace_use_grab) &&
+        (id == 0x57 || id == 0x40))
+      REXLOG_INFO("[c2-player-action] id={:#x} result={:#x}", id, ctx.r3.u32);
   }
   // Radio & TV Antenna Adjustment Function
   REX_HOOK_RAW(TvAntennaAdjust) {
