@@ -375,6 +375,25 @@ namespace rex::input::condemned2input {
       }
     }
 
+    // Device-state fallback for the checkpoint interaction regression:
+    // The UI-event-driven SDK MnkInputDriver can miss physical key events
+    // when SDL captures the pointer. XInput state from this custom device is
+    // merged (OR/max) with Mnk's state by InputSystem, so duplicating these
+    // exact buttons does not produce duplicate guest commands. In contrast,
+    // NativeKeyPress(Use/Grab) delivered independent, conflicting commands.
+    // This preserves the working health-kit path and needs no real gamepad.
+    if (out_state && !isDialogOpen && REXCVAR_GET(condemned2_input_legacy_mnk)) {
+      if (IsNativeBindDown("condemned2_input_use")) {
+        out_state->gamepad.buttons |= X_INPUT_GAMEPAD_A;
+      }
+      if (IsNativeBindDown("condemned2_input_primary_fire")) {
+        out_state->gamepad.left_trigger = 0xFF;
+      }
+      if (IsNativeBindDown("condemned2_input_secondary_fire")) {
+        out_state->gamepad.right_trigger = 0xFF;
+      }
+    }
+
     //Update controller
     packet_number_++; // Increment input packet number
     if (out_state) {
@@ -466,40 +485,16 @@ namespace rex::input::condemned2input {
     // HUD / forensic overlays are not proof that world interactions are off.
     // In particular, IsInMenu() may remain true after a tool-wheel transition.
     const bool hudOrMenu = IsInMenu();
-    if(hudOrMenu){
-      if(Pressed(activeBinds["condemned2_input_use"]) || Pressed(activeBinds["menu_enter"])){ //buttons |= X_INPUT_GAMEPAD_B;
-        NativeKeyPress({
-          //Submit menu confirm
-          0xa6,
-          0x5b,
-          //Menu confirm
-          0x87,
-          0xb5,
-          0xa7, //In-game menu confirm
-          0xb7, // Used for dialogs in fight club
-          0xba, // Close tutorial dialogs
-          0x5d // Choose investigation choice
-        });
-      }
-    }else{
-      //Menu interaction
-      if(Pressed(activeBinds["condemned2_input_use"]) || Pressed(activeBinds["menu_enter"])){ //buttons |= X_INPUT_GAMEPAD_B;
-        NativeKeyPress({
-          //Submit menu confirm
-          0xa6,
-          0x5b,
-          //Menu confirm
-          0x87,
-          0xb5,
-          0xa7, //In-game menu confirm
-          0xb7, // Used for dialogs in fight club
-          0xba, // Close tutorial dialogs
-          // With the A-button state bridge enabled this is dispatched by
-          // the guest's normal controller->command-set path. Don't double-send.
-          // Keep the direct guest command as a fallback for older builds.
-          0x5d // Choose investigation choice
-        });
-      }
+    // E was previously sending eight menu-confirm commands even in gameplay.
+    // That is not how v0.2.1 routes A, and can consume/interfere with the
+    // contextual pickup and scripted grab action at the mission_04 checkpoint.
+    // Only issue native menu commands when an actual game HUD/menu is active.
+    if (hudOrMenu &&
+        (Pressed(activeBinds["condemned2_input_use"]) ||
+         Pressed(activeBinds["menu_enter"]))) {
+      NativeKeyPress({
+          0xa6, 0x5b, 0x87, 0xb5, 0xa7, 0xb7, 0xba, 0x5d
+      });
     }
     // The game's command set decides whether world Use (0x57) is valid.
     // Always maintain its DOWN/HOLD/UP lifecycle, even while the HUD, GPS or
