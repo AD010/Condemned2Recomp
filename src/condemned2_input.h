@@ -66,8 +66,9 @@ namespace rex::input::condemned2input{
          Bind ParseBind(const std::string& s);
          bool IsDown(const Bind &b);
          bool Pressed(Bind& b);
-         void Held( std::initializer_list<std::reference_wrapper<Bind>> binds, std::vector<int32_t> keycodes, bool down = false, bool pressed = false);
-         void NativeKeyPress(std::vector<int32_t> keycodes, bool release = false);
+         void Held(std::initializer_list<std::reference_wrapper<Bind>> binds, std::vector<int32_t> keycodes, bool pressed = false);
+         void NativeKeyPress(std::vector<int32_t> keycodes);
+         void FlushNativeKeys();
          std::unordered_map<std::string, Bind> GetActiveBinds() { return activeBinds; }
 
          static bool WatchEventCallback(void* userdata, SDL_Event* event);
@@ -132,6 +133,8 @@ namespace rex::input::condemned2input{
          double move_dy;
          MouseBind mouse_clicks;
          std::unordered_map<std::string, Bind> activeBinds;
+         std::vector<int32_t> activeNativeKeys;
+         std::vector<int32_t> requestedNativeKeys;
          const std::vector<std::string> pcBinds = {
             "condemned2_input_move_forward",
             "condemned2_input_move_backward",
