@@ -19,6 +19,7 @@
 #include <rex/ui/window.h>
 
 #include <cstring>
+#include <cstdint>
 #include <functional>
 #include <initializer_list>
 #include <algorithm>
@@ -67,6 +68,11 @@ REXCVAR_DEFINE_DOUBLE(condemned2_input_mouse_sensitivity, 0.075, "Condemned 2/In
 
 REXCVAR_DEFINE_BOOL(condemned2_input_debug, false, "Condemned 2/Debug", "Toggle logging for all input.");
 REXCVAR_DEFINE_BOOL(condemned2_input_frame_debug, false, "Condemned 2/Debug", "Toggle logging for input per frame.");
+// The 0.3+ native driver sends guest input commands but did not fill the
+// X_INPUT_STATE that weapon pickup and dual-trigger finishers can consume.
+// Keep the native camera/forensic controls; surface E as A and LMB+RMB as
+// simultaneous triggers through the already-registered synthetic device.
+REXCVAR_DEFINE_BOOL(condemned2_input_pad_action_bridge, true, "Condemned 2/Input/Keyboard", "Use native keyboard/mouse to provide gamepad A and dual-trigger actions for contextual interactions.");
 
 //Native functions for inputs
 REX_EXTERN(__imp__Input_KeyDown);
@@ -263,6 +269,11 @@ namespace rex::input::condemned2input {
       return X_ERROR_DEVICE_NOT_CONNECTED;
     }
 
+    // The host input system merges real and synthetic controllers; never
+    // return an uninitialized X_INPUT_STATE (including the first frame).
+    if (out_state) {
+      std::memset(out_state, 0, sizeof(*out_state));
+    }
     //Wait one frame for native input system to initialize
     if(!blockFirstFrame){
       blockFirstFrame = true;
@@ -318,10 +329,41 @@ namespace rex::input::condemned2input {
       }
     }
 
+    // Input_GetButton / Input_KeyDown alone are not equivalent to a controller:
+    // the game also receives a state snapshot from XInputGetState. v0.2.1 had
+    // MnkInputDriver filling that snapshot; the 0.3+ custom driver only filled
+    // its packet_number, leaving A/LT/RT at zero. Restore the *actions only*
+    // while retaining v0.6 native mouse camera and forensic navigation.
+    const bool padBridge = REXCVAR_GET(condemned2_input_pad_action_bridge) && !isDialogOpen;
+    const bool guestUse = padBridge && (
+        IsNativeBindDown("condemned2_input_use") ||
+        IsNativeBindDown("menu_enter"));
+    const bool guestDualTrigger = padBridge &&
+        IsNativeBindDown("condemned2_input_primary_fire") &&
+        IsNativeBindDown("condemned2_input_secondary_fire");
+    uint16_t syntheticButtons = guestUse ? X_INPUT_GAMEPAD_A : 0;
+    // In the special grab/finisher context both triggers must be held
+    // simultaneously. Single mouse clicks still use the existing native
+    // melee/weapon handling; this avoids doubled regular attacks.
+    const uint8_t syntheticLT = guestDualTrigger ? 0xff : 0;
+    const uint8_t syntheticRT = guestDualTrigger ? 0xff : 0;
+
+    const uint32_t padState = uint32_t(syntheticButtons) |
+                              (uint32_t(syntheticLT) << 16) |
+                              (uint32_t(syntheticRT) << 24);
+    if (!padStateLogged_ || padState != lastPadState_) {
+      REXLOG_INFO("[c2-pad-actions] virtualA={} virtualLT={} virtualRT={} bridge={}",
+                  guestUse, syntheticLT != 0, syntheticRT != 0, padBridge);
+      padStateLogged_ = true;
+      lastPadState_ = padState;
+    }
     //Update controller
     packet_number_++; // Increment input packet number
     if (out_state) {
       out_state->packet_number = packet_number_;
+      out_state->gamepad.buttons = syntheticButtons;
+      out_state->gamepad.left_trigger = syntheticLT;
+      out_state->gamepad.right_trigger = syntheticRT;
     }
     return X_ERROR_SUCCESS;
   }
@@ -373,7 +415,8 @@ namespace rex::input::condemned2input {
     }
     // Real Xbox finisher: LT+RT together. Expose it for keyboard/mouse as
     // simultaneous LMB+RMB; preserve E/Q as optional contextual aliases.
-    if (isMouseLeft && isMouseRight && IsNativeCommandEnabled(0x40))
+    if (!REXCVAR_GET(condemned2_input_pad_action_bridge) &&
+        isMouseLeft && isMouseRight && IsNativeCommandEnabled(0x40))
       NativeKeyPress({0x40});
     //Mouse movement
     float dx = 0.0f, dy = 0.0f;
@@ -429,7 +472,9 @@ namespace rex::input::condemned2input {
           0xa7, //In-game menu confirm
           0xb7, // Used for dialogs in fight club
           0xba, // Close tutorial dialogs
-          0x57,
+          // With the A-button state bridge enabled this is dispatched by
+          // the guest's normal controller->command-set path. Don't double-send.
+          // Keep the direct guest command as a fallback for older builds.
           0x5d // Choose investigation choice
         });
       }
@@ -438,7 +483,9 @@ namespace rex::input::condemned2input {
     // Always maintain its DOWN/HOLD/UP lifecycle, even while the HUD, GPS or
     // forensic UI reports a menu state. Otherwise A works for health packs
     // and doors, but weapon pickup and scripted finishers never see Use.
-    Held({activeBinds["condemned2_input_use"], activeBinds["menu_enter"]}, {0x57} );
+    if (!REXCVAR_GET(condemned2_input_pad_action_bridge)) {
+      Held({activeBinds["condemned2_input_use"], activeBinds["menu_enter"]}, {0x57});
+    }
 
     //Menu back
     if(Pressed(activeBinds["menu_go_back"])){ //buttons |= X_INPUT_GAMEPAD_B;
@@ -472,7 +519,7 @@ namespace rex::input::condemned2input {
     if(IsDown(activeBinds["condemned2_input_hook_attacks"])){
       NativeKeyPress({0x42, 0xa8});
       // CS_Grab / CS_DoubleGrab: only in contexts where the guest enables it.
-      if (IsNativeCommandEnabled(0x40))
+      if (!REXCVAR_GET(condemned2_input_pad_action_bridge) && IsNativeCommandEnabled(0x40))
         NativeKeyPress({0x40});
     }
     if(!IsDown(activeBinds["condemned2_input_slowmo"]) && activeBinds["condemned2_input_slowmo"].prev){
@@ -485,7 +532,9 @@ namespace rex::input::condemned2input {
     // Contextual grab/finisher can also be triggered with the standard E key;
     // the game chooses the enabled action, while a single mapped key remains
     // usable for pickup and scripted quick-time interactions.
-    if (IsDown(activeBinds["condemned2_input_use"]) && IsNativeCommandEnabled(0x40))
+    if (!REXCVAR_GET(condemned2_input_pad_action_bridge) &&
+        IsDown(activeBinds["condemned2_input_use"]) &&
+        IsNativeCommandEnabled(0x40))
       NativeKeyPress({0x40});
 
     Held({activeBinds["condemned2_input_objectives"]}, {0x4f, 0x4e} );
@@ -752,11 +801,11 @@ namespace rex::input::condemned2input {
     // SDK's MnkInputDriver. The v0.6 native input driver only injected events,
     // so the original Input_GetButton path never saw E / scripted grabs.
     // Return digital button levels for the same guest commands as key events.
-    if (btn == 0x57) {
+    if (!REXCVAR_GET(condemned2_input_pad_action_bridge) && btn == 0x57) {
       return g_condemned2_input_driver->IsNativeCommandEnabled(0x57) &&
         g_condemned2_input_driver->IsNativeBindDown("condemned2_input_use");
     }
-    if (btn == 0x40) {
+    if (!REXCVAR_GET(condemned2_input_pad_action_bridge) && btn == 0x40) {
       const MouseBind triggers = g_condemned2_input_driver->MouseClick();
       return g_condemned2_input_driver->IsNativeCommandEnabled(0x40) &&
         ((triggers.isMouseLeft && triggers.isMouseRight) ||
