@@ -21,6 +21,7 @@
 #include <cstring>
 #include <functional>
 #include <initializer_list>
+#include <algorithm>
 
 #include <imgui.h>
 #include <imgui_internal.h>
@@ -82,6 +83,7 @@ REX_EXTERN(__imp__IsMeleeWeapon); // Checks if player's current weapon is a mele
 //Imported functions used for PC controls!
 REX_IMPORT(Input_KeyDown, PressBind, uint32_t(uint32_t, uint32_t));
 REX_IMPORT(Input_KeyHold, HoldBind, uint32_t(uint32_t, uint32_t));
+REX_IMPORT(Input_KeyUp, ReleaseBind, uint32_t(uint32_t, uint32_t));
 
 namespace rex::input::condemned2input {
   namespace {constexpr rex::input::DeviceId kDevice = static_cast<rex::input::DeviceId>(0x4E4F5000); constexpr uint32_t kInputManager = 0x4005ae70; constexpr uint32_t kInputManagerCRT = 0x200afcc0;}
@@ -288,8 +290,13 @@ namespace rex::input::condemned2input {
       last_dy = 0;
       last_add_dx = 0;
       last_add_dy = 0;
+      // Drop stale input edges when PC overlays take focus.
+      for (auto& [name, bind] : activeBinds) bind.prev = false;
     }
-    
+
+    // Dispatch once per device update so hold/release transitions cannot latch.
+    FlushNativeKeys();
+
     //Update controller
     packet_number_++; // Increment input packet number
     if (out_state) {
@@ -351,8 +358,8 @@ namespace rex::input::condemned2input {
     last_add_dy = std::clamp(last_add_dy, -1.0, 1.0);
 
     // Navigation
-    Held({activeBinds["menu_nav_up"], activeBinds["condemned2_input_move_forward"]}, {0x82}, wheelY == 0.0f, wheelY > 0.0f);
-    Held({activeBinds["menu_nav_down"], activeBinds["condemned2_input_move_backward"]}, {0x83}, wheelY == 0.0f, wheelY < 0.0f);
+    Held({activeBinds["menu_nav_up"], activeBinds["condemned2_input_move_forward"]}, {0x82}, wheelY > 0.0f);
+    Held({activeBinds["menu_nav_down"], activeBinds["condemned2_input_move_backward"]}, {0x83}, wheelY < 0.0f);
     Held({activeBinds["menu_nav_right"], activeBinds["condemned2_input_move_right"]}, {0x85, 0x8e} );
     Held({activeBinds["menu_nav_left"], activeBinds["condemned2_input_move_left"]}, {0x84, 0x8d} );
 
@@ -514,31 +521,41 @@ namespace rex::input::condemned2input {
     return edge;
   }
 
-  void Condemned2InputDriver::Held( std::initializer_list<std::reference_wrapper<Bind>> binds, std::vector<int32_t> keycodes, bool down, bool pressed) {
-    for ( Bind& bind : binds) {
-      bool capturedBind = false;
-      if((!IsDown(bind) || down ) && bind.prev){
-        NativeKeyPress(keycodes, true);
-        capturedBind = true;
-      }
-      if(Pressed(bind) || pressed ){
-        NativeKeyPress(keycodes);
-        bind.prev = true;
-        capturedBind = true;
-      } 
-      if(capturedBind) return;
+  // The guest must receive a KeyDown once, KeyHold while held, and KeyUp on release.
+  // Don't consume Pressed() edges here: other actions can already have examined E.
+  void Condemned2InputDriver::Held(std::initializer_list<std::reference_wrapper<Bind>> binds,
+                                  std::vector<int32_t> keycodes, bool pressed) {
+    bool active = pressed;
+    for (Bind& bind : binds) {
+      const bool isDown = IsDown(bind);
+      bind.prev = isDown;
+      active = active || isDown;
+    }
+    if (active) NativeKeyPress(std::move(keycodes));
+  }
+
+  // Preserve the original order of the native input codes for forensic quick-swap/QTE.
+  void Condemned2InputDriver::NativeKeyPress(std::vector<int32_t> keycodes) {
+    for (int32_t key : keycodes) {
+      if (std::find(requestedNativeKeys.begin(), requestedNativeKeys.end(), key) == requestedNativeKeys.end())
+        requestedNativeKeys.push_back(key);
     }
   }
 
-  // Native key presses in Condemned 2!
-  void Condemned2InputDriver::NativeKeyPress(std::vector<int32_t> keycodes, bool release ){
-    uint32_t keyManager = GetInputManager();
-    for (int32_t k : keycodes) {
-      PressBind(keyManager, k);
-      if(!release){
-        HoldBind(keyManager, k);
-      }
+  void Condemned2InputDriver::FlushNativeKeys() {
+    const uint32_t keyManager = GetInputManager();
+    // Release keys absent from this update, including forensic tools and one-shot taps.
+    for (int32_t key : activeNativeKeys) {
+      if (std::find(requestedNativeKeys.begin(), requestedNativeKeys.end(), key) == requestedNativeKeys.end())
+        ReleaseBind(keyManager, key);
     }
+    for (int32_t key : requestedNativeKeys) {
+      if (std::find(activeNativeKeys.begin(), activeNativeKeys.end(), key) == activeNativeKeys.end())
+        PressBind(keyManager, key);
+      HoldBind(keyManager, key);
+    }
+    activeNativeKeys.swap(requestedNativeKeys);
+    requestedNativeKeys.clear();
   }
   
   uint32_t Condemned2InputDriver::GetInputManager(){
