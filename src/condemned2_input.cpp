@@ -384,7 +384,7 @@ namespace rex::input::condemned2input {
     // This preserves the working health-kit path and needs no real gamepad.
     if (out_state && !isDialogOpen && REXCVAR_GET(condemned2_input_legacy_mnk)) {
       if (IsNativeBindDown("condemned2_input_use")) {
-        out_state->gamepad.buttons |= X_INPUT_GAMEPAD_A;
+        out_state->gamepad.buttons = X_INPUT_GAMEPAD_A;
       }
       if (IsNativeBindDown("condemned2_input_primary_fire")) {
         out_state->gamepad.left_trigger = 0xFF;
