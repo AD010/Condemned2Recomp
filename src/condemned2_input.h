@@ -61,6 +61,7 @@ namespace rex::input::condemned2input{
          void PCControls();
          uint32_t GetInputManager();
          bool IsNativeCommandEnabled(uint32_t action);
+         bool IsNativeBindDown(const char* bindName);
 
          bool IsAnyDialogOpen();
          std::unordered_map<std::string, ImGuiWindow*> GetActiveWindows() { return activeWindows; }
