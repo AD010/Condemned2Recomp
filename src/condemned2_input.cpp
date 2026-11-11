@@ -68,11 +68,9 @@ REXCVAR_DEFINE_DOUBLE(condemned2_input_mouse_sensitivity, 0.075, "Condemned 2/In
 
 REXCVAR_DEFINE_BOOL(condemned2_input_debug, false, "Condemned 2/Debug", "Toggle logging for all input.");
 REXCVAR_DEFINE_BOOL(condemned2_input_frame_debug, false, "Condemned 2/Debug", "Toggle logging for input per frame.");
-// The 0.3+ native driver sends guest input commands but did not fill the
-// X_INPUT_STATE that weapon pickup and dual-trigger finishers can consume.
-// Keep the native camera/forensic controls; surface E as A and LMB+RMB as
-// simultaneous triggers through the already-registered synthetic device.
-REXCVAR_DEFINE_BOOL(condemned2_input_pad_action_bridge, false, "Condemned 2/Input/Keyboard", "Experimental extra XInput A/LT/RT bridge. Disabled by default because it broke native Use and medkit pickup.");
+// Native action commands handle keyboard/mouse interaction directly.
+// Do not inject synthetic gamepad A/LT/RT: the regression in log 030 showed
+// that this removed working health-pack pickup without restoring grabs.
 
 //Native functions for inputs
 REX_EXTERN(__imp__Input_KeyDown);
@@ -329,41 +327,10 @@ namespace rex::input::condemned2input {
       }
     }
 
-    // Input_GetButton / Input_KeyDown alone are not equivalent to a controller:
-    // the game also receives a state snapshot from XInputGetState. v0.2.1 had
-    // MnkInputDriver filling that snapshot; the 0.3+ custom driver only filled
-    // its packet_number, leaving A/LT/RT at zero. Restore the *actions only*
-    // while retaining v0.6 native mouse camera and forensic navigation.
-    const bool padBridge = REXCVAR_GET(condemned2_input_pad_action_bridge) && !isDialogOpen;
-    const bool guestUse = padBridge && (
-        IsNativeBindDown("condemned2_input_use") ||
-        IsNativeBindDown("menu_enter"));
-    const bool guestDualTrigger = padBridge &&
-        IsNativeBindDown("condemned2_input_primary_fire") &&
-        IsNativeBindDown("condemned2_input_secondary_fire");
-    uint16_t syntheticButtons = guestUse ? X_INPUT_GAMEPAD_A : 0;
-    // In the special grab/finisher context both triggers must be held
-    // simultaneously. Single mouse clicks still use the existing native
-    // melee/weapon handling; this avoids doubled regular attacks.
-    const uint8_t syntheticLT = guestDualTrigger ? 0xff : 0;
-    const uint8_t syntheticRT = guestDualTrigger ? 0xff : 0;
-
-    const uint32_t padState = uint32_t(syntheticButtons) |
-                              (uint32_t(syntheticLT) << 16) |
-                              (uint32_t(syntheticRT) << 24);
-    if (!padStateLogged_ || padState != lastPadState_) {
-      REXLOG_INFO("[c2-pad-actions] virtualA={} virtualLT={} virtualRT={} bridge={}",
-                  guestUse, syntheticLT != 0, syntheticRT != 0, padBridge);
-      padStateLogged_ = true;
-      lastPadState_ = padState;
-    }
     //Update controller
     packet_number_++; // Increment input packet number
     if (out_state) {
       out_state->packet_number = packet_number_;
-      out_state->gamepad.buttons = syntheticButtons;
-      out_state->gamepad.left_trigger = syntheticLT;
-      out_state->gamepad.right_trigger = syntheticRT;
     }
     return X_ERROR_SUCCESS;
   }
