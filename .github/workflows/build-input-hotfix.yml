@@ -1,16 +1,5 @@
-name: Condemned2 Windows x64 Input State V3 Loader-Safe (0.6.0)
+name: Condemned2 LEGACY binary input experiment (not source compilation)
 on:
-  push:
-    branches:
-      - fix/input-weapon-pickup-qte-060
-    paths:
-      - 'src/condemned2_input.cpp'
-      - 'src/condemned2_input.h'
-      - 'ci/patch_win64_input_release.py'
-      - 'ci/patch_input_state_v2.py'
-      - 'ci/patch_input_state_v3.py'
-      - 'ci/smoke_windows_pe_loader.py'
-      - '.github/workflows/build-input-hotfix.yml'
   workflow_dispatch:
 
 permissions:
