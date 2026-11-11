@@ -574,6 +574,12 @@ namespace rex::input::condemned2input {
     return (IsCommandEnabled(GetInputManager(), action) & 0xff) != 0;
   }
 
+  // Query the original native keyboard state without copying the entire bind map.
+  bool Condemned2InputDriver::IsNativeBindDown(const char* bindName) {
+    const auto it = activeBinds.find(bindName);
+    return it != activeBinds.end() && IsDown(it->second);
+  }
+
   uint32_t Condemned2InputDriver::GetInputManager(){
     if(isUsingCRT){
       return kInputManagerCRT;
@@ -692,15 +698,12 @@ namespace rex::input::condemned2input {
     // Return digital button levels for the same guest commands as key events.
     if (btn == 0x57) {
       return g_condemned2_input_driver->IsNativeCommandEnabled(0x57) &&
-        g_condemned2_input_driver->IsDown(
-          g_condemned2_input_driver->GetActiveBinds().at("condemned2_input_use"));
+        g_condemned2_input_driver->IsNativeBindDown("condemned2_input_use");
     }
     if (btn == 0x40) {
       return g_condemned2_input_driver->IsNativeCommandEnabled(0x40) &&
-        (g_condemned2_input_driver->IsDown(
-           g_condemned2_input_driver->GetActiveBinds().at("condemned2_input_use")) ||
-         g_condemned2_input_driver->IsDown(
-           g_condemned2_input_driver->GetActiveBinds().at("condemned2_input_hook_attacks")));
+        (g_condemned2_input_driver->IsNativeBindDown("condemned2_input_use") ||
+         g_condemned2_input_driver->IsNativeBindDown("condemned2_input_hook_attacks"));
     }
 
     //Sprint
