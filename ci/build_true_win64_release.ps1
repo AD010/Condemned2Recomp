@@ -59,10 +59,13 @@ if (!(Test-Path (Join-Path $SourceRoot 'condemned2recomp_manifest.toml'))) {
 Write-Host '=== Verify Win64 clang toolchain ==='
 $clangVersion = (& clang++ --version | Select-Object -First 1)
 Write-Host $clangVersion
-if ($LASTEXITCODE -ne 0 -or $clangVersion -notmatch 'version\s+(\d+)\.') {
-    throw 'Cannot establish the installed Clang version'
+if ($LASTEXITCODE -ne 0) { throw 'Clang did not start successfully' }
+if ($clangVersion -match 'version\s+(\d+)\.') {
+    $clangMajor = [int]$Matches[1]
+} else {
+    throw "Cannot establish the installed Clang version: $clangVersion"
 }
-if ([int]$Matches[1] -lt 20) { throw 'Requires LLVM/Clang 20 or later' }
+if ($clangMajor -lt 20) { throw 'Requires LLVM/Clang 20 or later' }
 
 $buildDir = Join-Path $SourceRoot 'out/build/win-amd64-release'
 $sdkDir = Join-Path $SourceRoot 'thirdparty/rexglue-sdk'
