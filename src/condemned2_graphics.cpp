@@ -17,6 +17,7 @@
 #include <rex/system/xmemory.h>
 
 #include <string>
+#include <cstring>
 #include <sstream>
 #include <unordered_map>
 #include <format>
@@ -55,6 +56,9 @@ REXCVAR_DEFINE_DOUBLE(condemned2_fov, 1.0, "Condemned 2/Graphics", "Camera Fov")
 REXCVAR_DEFINE_DOUBLE(condemned2_film_grain, 0.2, "Condemned 2/Graphics", "Film Grain").range(0.0f, 1.0f);
 REXCVAR_DEFINE_DOUBLE(condemned2_saturation, 0.3, "Condemned 2/Graphics", "Film Grain").range(0.0f, 1.0f);
 REXCVAR_DEFINE_BOOL(condemned2_screen_effects, true, "Condemned 2/Graphics", "Screen Effects");
+// The 0.6.0 ReXGlue game can leave the SP HUD in spectator mode after
+// checkpoint/restart, hiding weapon pickup prompts and disabling prompt logic.
+REXCVAR_DEFINE_BOOL(condemned2_sp_spectator_prompt_fix, true, "Condemned 2/Gameplay", "Prevent spectator HUD events from disabling single-player interaction prompts.");
 REXCVAR_DEFINE_BOOL(condemned2_snow_effects, true, "Condemned 2/Graphics", "Snow Effects");
 REXCVAR_DEFINE_STRING(condemned2_shadow_quality, "High","Condemned 2/Graphics", "Shadow Quality").allowed({"Native", "Low", "Medium", "High"});
 
@@ -62,6 +66,7 @@ REXCVAR_DEFINE_STRING(condemned2_shadow_quality, "High","Condemned 2/Graphics", 
 REX_EXTERN(__imp__ApplyDisplaySettings);
 REX_EXTERN(__imp__Global_MinShadowLOD);
 REX_EXTERN(__imp__Global_ShadowLOD);
+REX_EXTERN(__imp__HudSpectatorModeChange);
 
 namespace rex::graphics::condemned2graphics {
     Condemned2Graphics* g_condemned2_graphics = nullptr;
@@ -132,6 +137,31 @@ namespace rex::graphics::condemned2graphics {
         if ( lod >= 0 ){
             ctx.r3.u32 = lod;
         }
+    }
+
+    // Single-player HUD spectator regression (upstream issue #38).
+    // CActionScriptPlayer::OnSpectatorModeChange forwards a nonzero mode to
+    // Flash as SpectatorModeBegin. Flash keeps b_InSpectatorMode=true, hides
+    // weapon/response prompts, and UpdateActivationPrompt stops calling
+    // Player.CanPickUp. SpectatorModeExit is gated to multiplayer, so the
+    // HUD remains stuck after loading a checkpoint.
+    //
+    // This hook is adapted from Evasion3356's researched, Windows-tested
+    // feature/cheats branch (Condemned2Recomp PR #36).
+    // TODO: before enabling multiplayer, gate on the actual SP game mode.
+    REX_HOOK_RAW(HudSpectatorModeChange) {
+        uint32_t mode = 0;
+        if (ctx.r5.u32) {
+            std::memcpy(&mode, base + ctx.r5.u32, sizeof(mode));
+            mode = _byteswap_ulong(mode);
+        }
+        if (mode != 0 && REXCVAR_GET(condemned2_sp_spectator_prompt_fix)) {
+            REXLOG_WARN("[c2-hud-spectator] Blocked SpectatorModeBegin mode={} to preserve interaction prompts", mode);
+            ctx.r3.u32 = 0;
+            return;
+        }
+        REXLOG_INFO("[c2-hud-spectator] SpectatorModeChange mode={} forwarded to game", mode);
+        __imp__HudSpectatorModeChange(ctx, base);
     }
 
     //Native Resolution
