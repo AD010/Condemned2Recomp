@@ -57,9 +57,15 @@ if (!(Test-Path (Join-Path $SourceRoot 'condemned2recomp_manifest.toml'))) {
 }
 
 Write-Host '=== Verify Win64 clang toolchain ==='
-$clangVersion = (& clang++ --version | Select-Object -First 1)
+# Visual Studio developer setup prepends its own LLVM 19 to PATH. Use the
+# runner-wide LLVM 20 explicitly, regardless of the MSVC toolchain PATH.
+$clangC = 'C:/Program Files/LLVM/bin/clang.exe'
+$clangCxx = 'C:/Program Files/LLVM/bin/clang++.exe'
+if (!(Test-Path -LiteralPath $clangC -PathType Leaf)) { throw "Missing pinned Clang C compiler: $clangC" }
+if (!(Test-Path -LiteralPath $clangCxx -PathType Leaf)) { throw "Missing pinned Clang C++ compiler: $clangCxx" }
+$versionLines = @(& $clangCxx --version)
+$clangVersion = $versionLines[0]
 Write-Host $clangVersion
-if ($LASTEXITCODE -ne 0) { throw 'Clang did not start successfully' }
 if ($clangVersion -match 'version\s+(\d+)\.') {
     $clangMajor = [int]$Matches[1]
 } else {
@@ -76,8 +82,8 @@ try {
         '--preset', 'win-amd64-release',
         "-DREXSDK_DIR=$sdkDir",
         '-DREXGLUE_RECOMP_DEBUG_INFO=none',
-        '-DCMAKE_C_COMPILER=clang',
-        '-DCMAKE_CXX_COMPILER=clang++'
+        "-DCMAKE_C_COMPILER=$clangC",
+        "-DCMAKE_CXX_COMPILER=$clangCxx"
     )
     # Configure SDK, host project, codegen target.
     Exec 'cmake' $configuration
