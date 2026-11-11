@@ -251,7 +251,6 @@ namespace rex::input::condemned2input {
         }
       };
       setGuestBind("mnk_mode", "true");
-      setGuestBind("mnk_passthrough", "false");
       setGuestBind("mnk_mouse", "false");
       const char* unusedPadBinds[] = {
         "keybind_b", "keybind_x", "keybind_y",
@@ -434,7 +433,12 @@ namespace rex::input::condemned2input {
     // Dual-trigger grab is a deliberate LMB+RMB chord; send the guest
     // event unconditionally, even if IsCommandEnabled reports false.
     // This does not fire for ordinary one-button combat.
-    if (isMouseLeft && isMouseRight)
+    // The SDK MnK controller already reports LT+RT to the game via
+    // XInputGetState, matching the working 0.2.1 path. Do not also dispatch
+    // an unrelated native Grab command: double delivery changes the game's
+    // interaction state and can cancel an otherwise valid finisher.
+    if (!REXCVAR_GET(condemned2_input_legacy_mnk) &&
+        isMouseLeft && isMouseRight)
       NativeKeyPress({0x40});
     //Mouse movement
     float dx = 0.0f, dy = 0.0f;
@@ -504,7 +508,11 @@ namespace rex::input::condemned2input {
     // Regression fix: do NOT replace this native command with synthetic A.
     // The A-only experiment prevented even health-pack pickup (log 030).
     // Keep Down/Hold/Up for Use in all modes.
-    Held({activeBinds["condemned2_input_use"], activeBinds["menu_enter"]}, {0x57});
+    // In legacy MnK mode, E is the SDK's XInput A button (as in v0.2.1).
+    // Never send a second direct 0x57 action for the same key; pickup and
+    // finisher context must be resolved by the original controller pipeline.
+    if (!REXCVAR_GET(condemned2_input_legacy_mnk))
+      Held({activeBinds["condemned2_input_use"], activeBinds["menu_enter"]}, {0x57});
 
     //Menu back
     if(Pressed(activeBinds["menu_go_back"])){ //buttons |= X_INPUT_GAMEPAD_B;
@@ -540,7 +548,8 @@ namespace rex::input::condemned2input {
       // CS_Grab / CS_DoubleGrab: only in contexts where the guest enables it.
       // Do not gate a physical Q action on IsCommandEnabled: the guest
       // reported false at the exact time the clown finisher was attempted.
-      NativeKeyPress({0x40});
+      if (!REXCVAR_GET(condemned2_input_legacy_mnk))
+        NativeKeyPress({0x40});
     }
     if(!IsDown(activeBinds["condemned2_input_slowmo"]) && activeBinds["condemned2_input_slowmo"].prev){
       _hooks->SendCommandCmd({_hooks->AllocateHeapForString("msg Player (slowmo off)"), 0, 0, 0});
@@ -828,10 +837,12 @@ namespace rex::input::condemned2input {
     // Unlike a permission/availability hint, an explicit player button
     // press must be delivered to the engine even if Input_IsCommandEnabled
     // currently says false (as seen throughout mission_04 in log 030).
-    if (btn == 0x57) {
+    // With the v0.2.1 keyboard controller restored, use the guest's original
+    // button state instead of overlaying a separate native command state.
+    if (!REXCVAR_GET(condemned2_input_legacy_mnk) && btn == 0x57) {
       return g_condemned2_input_driver->IsNativeBindDown("condemned2_input_use");
     }
-    if (btn == 0x40) {
+    if (!REXCVAR_GET(condemned2_input_legacy_mnk) && btn == 0x40) {
       const MouseBind triggers = g_condemned2_input_driver->MouseClick();
       return (triggers.isMouseLeft && triggers.isMouseRight) ||
              g_condemned2_input_driver->IsNativeBindDown("condemned2_input_hook_attacks");
