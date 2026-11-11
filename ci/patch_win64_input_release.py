@@ -31,7 +31,7 @@ def patch_exe(data):
         raise ValueError("Unknown executable version - refusing to patch")
     exe = bytearray(data)
     pe_header = struct.unpack_from("<I", exe, 0x3c)[0]
-    if exe[pe_header:pe_header+4] != b"PE\\x00\\x00":
+    if exe[pe_header:pe_header+4] != b"PE\x00\x00":
         raise ValueError("Not a PE file")
     if struct.unpack_from("<H",exe,pe_header+24)[0] != 0x20B:
         raise ValueError("Not PE32+")
@@ -40,7 +40,7 @@ def patch_exe(data):
     sections = {}
     for index in range(section_count):
         offset = section_headers + 40 * index
-        name = bytes(exe[offset:offset+8]).rstrip(b"\\x00").decode("ascii")
+        name = bytes(exe[offset:offset+8]).rstrip(b"\x00").decode("ascii")
         virtual_size, rva, raw_size, raw_offset = struct.unpack_from("<IIII",exe,offset+8)
         sections[name] = (offset,virtual_size,rva,raw_size,raw_offset)
     th,t_virtual,t_rva,t_raw,t_offset = sections[".text"]
@@ -54,18 +54,18 @@ def patch_exe(data):
         raise ValueError("NativeKeyPress call site changed")
     if exe[file_offset(0x14205e46b):file_offset(0x14205e46b)+10] != bytes.fromhex("80 7b 2f 00 0f 85 69 ff ff ff"):
         raise ValueError("NativeKeyPress release branch changed")
-    if exe[CAVE_FILE_OFFSET:CAVE_FILE_OFFSET+64] != b"\\xcc"*64:
+    if exe[CAVE_FILE_OFFSET:CAVE_FILE_OFFSET+64] != b"\xcc"*64:
         raise ValueError("Required PE code padding is not empty")
     cave_va = IMAGE_BASE + t_rva + CAVE_FILE_OFFSET - t_offset
     code = bytearray.fromhex("48 83 ec 28 80 7b 2f 00 75 07")
-    code += b"\\xe8" + rel32(cave_va+len(code), DOWN_VA)
+    code += b"\xe8" + rel32(cave_va+len(code), DOWN_VA)
     code += bytes.fromhex("eb 05")
-    code += b"\\xe8" + rel32(cave_va+len(code), UP_VA)
+    code += b"\xe8" + rel32(cave_va+len(code), UP_VA)
     code += bytes.fromhex("48 83 c4 28 c3")
     if len(code) != 27:
         raise AssertionError("Unexpected trampoline length")
     exe[CAVE_FILE_OFFSET:CAVE_FILE_OFFSET+len(code)] = code
-    exe[location:location+5] = b"\\xe8" + rel32(CALL_VA,cave_va)
+    exe[location:location+5] = b"\xe8" + rel32(CALL_VA,cave_va)
     struct.pack_into("<I",exe,th+8,t_raw)
     if CALL_VA + 5 + struct.unpack_from("<i",exe,location+1)[0] != cave_va:
         raise AssertionError("Patched call does not point at trampoline")
