@@ -70,7 +70,13 @@ REXCVAR_DEFINE_BOOL(condemned2_input_debug, false, "Condemned 2/Debug", "Toggle 
 REXCVAR_DEFINE_BOOL(condemned2_input_frame_debug, false, "Condemned 2/Debug", "Toggle logging for input per frame.");
 // Log only player interaction transitions; this distinguishes injected input
 // from gameplay command dispatch and avoids huge per-frame trace files.
-REXCVAR_DEFINE_BOOL(condemned2_input_trace_use_grab, true, "Condemned 2/Debug", "Log use/grab guest input dispatch for missing pickup prompt investigation.");
+REXCVAR_DEFINE_BOOL(condemned2_input_trace_use_grab, false, "Condemned 2/Debug", "Log use/grab guest input dispatch for missing pickup prompt investigation.");
+// 0.2.1 had the standard MnkInputDriver alongside the native mouse hooks.
+// Since 0.3.x, the game is missing pickup/grab prompts with keyboard/mouse,
+// but real controller paths still work. Restore the SDK's actual keyboard
+// device, not the one-off raw XInput A bridge that broke health kits.
+REXCVAR_DEFINE_BOOL(condemned2_input_legacy_mnk, true, "Condemned 2/Input/Keyboard", "Restore the 0.2.1 keyboard gamepad input device for world pickup and scripted finishers. Native mouse camera stays enabled.")
+    .lifecycle(rex::cvar::Lifecycle::kRequiresRestart);
 // Native action commands handle keyboard/mouse interaction directly.
 // Do not inject synthetic gamepad A/LT/RT: the regression in log 030 showed
 // that this removed working health-pack pickup without restoring grabs.
@@ -231,6 +237,46 @@ namespace rex::input::condemned2input {
     if (sdl_driver->Setup() == X_STATUS_SUCCESS) {
       input->AddDriver(std::move(sdl_driver));
       REXLOG_INFO("[condemned2_input] SDL Input Driver Initialized");
+    }
+
+    // Restore the exact SDK MnkInputDriver class used by v0.2.1, while
+    // preserving the native v0.6 mouse camera and forensic input driver.
+    // Avoid all other default Mnk keybinds, which conflict with E, Space,
+    // R, WASD, the forensic number keys and arrow-key evidence navigation.
+    // The SDK merges synthetic devices into player 0 via SlotAssignment.
+    if (REXCVAR_GET(condemned2_input_legacy_mnk)) {
+      auto setGuestBind = [](const char* name, const char* value) {
+        if (!rex::cvar::SetFlagByName(name, value)) {
+          REXLOG_ERROR("[c2-legacy-mnk] unable to set SDK bind {}", name);
+        }
+      };
+      setGuestBind("mnk_mode", "true");
+      setGuestBind("mnk_passthrough", "false");
+      setGuestBind("mnk_mouse", "false");
+      const char* unusedPadBinds[] = {
+        "keybind_b", "keybind_x", "keybind_y",
+        "keybind_left_shoulder", "keybind_right_shoulder",
+        "keybind_lstick_up", "keybind_lstick_down",
+        "keybind_lstick_left", "keybind_lstick_right",
+        "keybind_lstick_press", "keybind_rstick_up",
+        "keybind_rstick_down", "keybind_rstick_left",
+        "keybind_rstick_right", "keybind_rstick_press",
+        "keybind_dpad_up", "keybind_dpad_down",
+        "keybind_dpad_left", "keybind_dpad_right",
+        "keybind_back", "keybind_start", "keybind_guide"
+      };
+      for (const char* key : unusedPadBinds) setGuestBind(key, "");
+      setGuestBind("keybind_a", "E");
+      setGuestBind("keybind_left_trigger", "LMB");
+      setGuestBind("keybind_right_trigger", "RMB");
+
+      auto mnkDriver = std::make_unique<mnk::MnkInputDriver>(nullptr, 0);
+      if (mnkDriver->Setup() == X_STATUS_SUCCESS) {
+        input->AddDriver(std::move(mnkDriver));
+        REXLOG_INFO("[c2-legacy-mnk] v0.2.1 keyboard device restored: E=A, LMB=LT, RMB=RT, native camera retained");
+      } else {
+        REXLOG_ERROR("[c2-legacy-mnk] SDK keyboard driver setup failed");
+      }
     }
 
     //Condemned 2 Custom Input Driver
