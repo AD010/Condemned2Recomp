@@ -11,6 +11,11 @@ on:
       - fix/input-weapon-pickup-qte-060
     paths:
       - '.github/workflows/build-input-hotfix.yml'
+      - 'ci/build_true_win64_release.ps1'
+      - 'src/condemned2_input.cpp'
+      - 'src/condemned2_input.h'
+      - 'CMakeLists.txt'
+      - 'config/condemned2recomp_config_tu.toml'
 
 permissions:
   contents: read
@@ -67,6 +72,18 @@ jobs:
         uses: ilammy/msvc-dev-cmd@v1
         with:
           arch: amd64
+
+      - name: Validate complete PowerShell build script syntax
+        run: |
+          $buildScript = Join-Path $env:GITHUB_WORKSPACE 'src/ci/build_true_win64_release.ps1'
+          $tokens = $null
+          $parseErrors = $null
+          [void][System.Management.Automation.Language.Parser]::ParseFile($buildScript, [ref]$tokens, [ref]$parseErrors)
+          if ($parseErrors.Count -gt 0) {
+            $parseErrors | ForEach-Object { Write-Error $_.Message }
+            throw 'PowerShell build script contains syntax errors'
+          }
+          Write-Host 'PowerShell script parse verification passed.'
 
       - name: REAL recompilation from XEX with Clang and ReXGlue codegen
         run: |
