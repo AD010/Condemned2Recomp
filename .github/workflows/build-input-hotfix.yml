@@ -1,4 +1,4 @@
-name: Condemned2 Windows x64 Input Hotfix (0.6.0)
+name: Condemned2 Windows x64 Input State V2 (0.6.0)
 on:
   push:
     branches:
@@ -7,6 +7,7 @@ on:
       - 'src/condemned2_input.cpp'
       - 'src/condemned2_input.h'
       - 'ci/patch_win64_input_release.py'
+      - 'ci/patch_input_state_v2.py'
       - '.github/workflows/build-input-hotfix.yml'
   workflow_dispatch:
 
@@ -48,18 +49,18 @@ jobs:
           if ($actual -ne $expected) { throw "Unexpected official ZIP SHA256: $actual" }
           Write-Host "Official release verified: $actual"
 
-      - name: Patch and package existing Windows executable
+      - name: Patch and package existing Windows executable — V2
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
-          python ci/patch_win64_input_release.py --input official.zip --output Condemned2Recomp-0.6.0-InputRelease-HOTFIX-Windows-x64.zip
+          python ci/patch_input_state_v2.py --input official.zip --output Condemned2Recomp-0.6.0-InputState-V2-Windows-x64.zip
           if ($LASTEXITCODE -ne 0) { throw 'PE hotfix packaging failed' }
 
       - name: Upload standalone release archive
         uses: actions/upload-artifact@v4
         with:
-          name: Condemned2Recomp-0.6.0-InputRelease-HOTFIX-Windows-x64
-          path: Condemned2Recomp-0.6.0-InputRelease-HOTFIX-Windows-x64.zip
+          name: Condemned2Recomp-0.6.0-InputState-V2-Windows-x64
+          path: Condemned2Recomp-0.6.0-InputState-V2-Windows-x64.zip
           if-no-files-found: error
           compression-level: 0
           retention-days: 30
