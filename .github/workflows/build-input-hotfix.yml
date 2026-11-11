@@ -13,6 +13,7 @@ on:
       - '.github/workflows/build-input-hotfix.yml'
       - 'ci/build_true_win64_release.ps1'
       - 'src/condemned2_input.cpp'
+      - 'src/condemned2_graphics.cpp'
       - 'src/condemned2_input.h'
       - 'CMakeLists.txt'
       - 'config/condemned2recomp_config_tu.toml'
