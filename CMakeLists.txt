@@ -5,6 +5,12 @@ project(condemned2recomp LANGUAGES C CXX)
 set(CMAKE_CXX_STANDARD 23)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
+# The CI checkout includes the pinned ReXGlue SDK submodule. Keep the
+# standard installed-SDK path available for other developers.
+if(NOT REXSDK_DIR AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/thirdparty/rexglue-sdk/CMakeLists.txt")
+    set(REXSDK_DIR "${CMAKE_CURRENT_SOURCE_DIR}/thirdparty/rexglue-sdk" CACHE PATH "ReXGlue SDK source directory")
+endif()
+
 include(FetchContent)
 include("${CMAKE_CURRENT_SOURCE_DIR}/generated/rexglue.cmake")
 
@@ -37,7 +43,14 @@ else()
     )
 endif()
 
-rexglue_setup_target(condemned2recomp)
+# The standalone Win64 build must carry the Xenos GPU runtime.
+rexglue_setup_target(condemned2recomp GPU_PLUGINS xenos)
+
+# ImGui is included directly by condemned2_input.cpp. With an SDK source tree,
+# its bundled include directory is not exported by all SDK revisions.
+if(REXSDK_DIR AND EXISTS "${REXSDK_DIR}/thirdparty/imgui/imgui.h")
+    target_include_directories(condemned2recomp PRIVATE "${REXSDK_DIR}/thirdparty/imgui")
+endif()
 
 # -------------------------------------------------
 # Condemned2Recomp Updater
