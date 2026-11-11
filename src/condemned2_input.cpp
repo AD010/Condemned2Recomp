@@ -72,7 +72,7 @@ REXCVAR_DEFINE_BOOL(condemned2_input_frame_debug, false, "Condemned 2/Debug", "T
 // X_INPUT_STATE that weapon pickup and dual-trigger finishers can consume.
 // Keep the native camera/forensic controls; surface E as A and LMB+RMB as
 // simultaneous triggers through the already-registered synthetic device.
-REXCVAR_DEFINE_BOOL(condemned2_input_pad_action_bridge, true, "Condemned 2/Input/Keyboard", "Use native keyboard/mouse to provide gamepad A and dual-trigger actions for contextual interactions.");
+REXCVAR_DEFINE_BOOL(condemned2_input_pad_action_bridge, false, "Condemned 2/Input/Keyboard", "Experimental extra XInput A/LT/RT bridge. Disabled by default because it broke native Use and medkit pickup.");
 
 //Native functions for inputs
 REX_EXTERN(__imp__Input_KeyDown);
@@ -415,8 +415,10 @@ namespace rex::input::condemned2input {
     }
     // Real Xbox finisher: LT+RT together. Expose it for keyboard/mouse as
     // simultaneous LMB+RMB; preserve E/Q as optional contextual aliases.
-    if (!REXCVAR_GET(condemned2_input_pad_action_bridge) &&
-        isMouseLeft && isMouseRight && IsNativeCommandEnabled(0x40))
+    // Dual-trigger grab is a deliberate LMB+RMB chord; send the guest
+    // event unconditionally, even if IsCommandEnabled reports false.
+    // This does not fire for ordinary one-button combat.
+    if (isMouseLeft && isMouseRight)
       NativeKeyPress({0x40});
     //Mouse movement
     float dx = 0.0f, dy = 0.0f;
@@ -483,9 +485,10 @@ namespace rex::input::condemned2input {
     // Always maintain its DOWN/HOLD/UP lifecycle, even while the HUD, GPS or
     // forensic UI reports a menu state. Otherwise A works for health packs
     // and doors, but weapon pickup and scripted finishers never see Use.
-    if (!REXCVAR_GET(condemned2_input_pad_action_bridge)) {
-      Held({activeBinds["condemned2_input_use"], activeBinds["menu_enter"]}, {0x57});
-    }
+    // Regression fix: do NOT replace this native command with synthetic A.
+    // The A-only experiment prevented even health-pack pickup (log 030).
+    // Keep Down/Hold/Up for Use in all modes.
+    Held({activeBinds["condemned2_input_use"], activeBinds["menu_enter"]}, {0x57});
 
     //Menu back
     if(Pressed(activeBinds["menu_go_back"])){ //buttons |= X_INPUT_GAMEPAD_B;
@@ -519,8 +522,9 @@ namespace rex::input::condemned2input {
     if(IsDown(activeBinds["condemned2_input_hook_attacks"])){
       NativeKeyPress({0x42, 0xa8});
       // CS_Grab / CS_DoubleGrab: only in contexts where the guest enables it.
-      if (!REXCVAR_GET(condemned2_input_pad_action_bridge) && IsNativeCommandEnabled(0x40))
-        NativeKeyPress({0x40});
+      // Do not gate a physical Q action on IsCommandEnabled: the guest
+      // reported false at the exact time the clown finisher was attempted.
+      NativeKeyPress({0x40});
     }
     if(!IsDown(activeBinds["condemned2_input_slowmo"]) && activeBinds["condemned2_input_slowmo"].prev){
       _hooks->SendCommandCmd({_hooks->AllocateHeapForString("msg Player (slowmo off)"), 0, 0, 0});
@@ -532,10 +536,8 @@ namespace rex::input::condemned2input {
     // Contextual grab/finisher can also be triggered with the standard E key;
     // the game chooses the enabled action, while a single mapped key remains
     // usable for pickup and scripted quick-time interactions.
-    if (!REXCVAR_GET(condemned2_input_pad_action_bridge) &&
-        IsDown(activeBinds["condemned2_input_use"]) &&
-        IsNativeCommandEnabled(0x40))
-      NativeKeyPress({0x40});
+    // E remains ordinary Use. Do not synthesize Grab from E; those are
+    // separate actions and E worked for medkits before the A bridge.
 
     Held({activeBinds["condemned2_input_objectives"]}, {0x4f, 0x4e} );
     // 0x70 is the original ForensicsReturn command when the tool selector
@@ -801,16 +803,16 @@ namespace rex::input::condemned2input {
     // SDK's MnkInputDriver. The v0.6 native input driver only injected events,
     // so the original Input_GetButton path never saw E / scripted grabs.
     // Return digital button levels for the same guest commands as key events.
-    if (!REXCVAR_GET(condemned2_input_pad_action_bridge) && btn == 0x57) {
-      return g_condemned2_input_driver->IsNativeCommandEnabled(0x57) &&
-        g_condemned2_input_driver->IsNativeBindDown("condemned2_input_use");
+    // Unlike a permission/availability hint, an explicit player button
+    // press must be delivered to the engine even if Input_IsCommandEnabled
+    // currently says false (as seen throughout mission_04 in log 030).
+    if (btn == 0x57) {
+      return g_condemned2_input_driver->IsNativeBindDown("condemned2_input_use");
     }
-    if (!REXCVAR_GET(condemned2_input_pad_action_bridge) && btn == 0x40) {
+    if (btn == 0x40) {
       const MouseBind triggers = g_condemned2_input_driver->MouseClick();
-      return g_condemned2_input_driver->IsNativeCommandEnabled(0x40) &&
-        ((triggers.isMouseLeft && triggers.isMouseRight) ||
-         g_condemned2_input_driver->IsNativeBindDown("condemned2_input_use") ||
-         g_condemned2_input_driver->IsNativeBindDown("condemned2_input_hook_attacks"));
+      return (triggers.isMouseLeft && triggers.isMouseRight) ||
+             g_condemned2_input_driver->IsNativeBindDown("condemned2_input_hook_attacks");
     }
 
     //Sprint
