@@ -144,22 +144,20 @@ Compress-Archive -Path (Join-Path $stage '*') -DestinationPath $zipOut -Compress
 Add-Type -AssemblyName System.IO.Compression.FileSystem
 $check = [IO.Compression.ZipFile]::OpenRead($zipOut)
 try {
-    if (-not @($check.Entries | Where-Object FullName -eq 'condemned2recomp.exe').Count) {
-        throw 'Compiled EXE not present in ZIP'
+    $exeEntries = @($check.Entries | Where-Object { $_.FullName -eq 'condemned2recomp.exe' })
+    if ($exeEntries.Count -ne 1) {
+        throw 'Compiled EXE not present exactly once in ZIP'
     }
-    if (@($check.Entries | Where-Object { $_.FullName -match '(?i)\.(xex|xexp|iso) }).Count) {
+    $privateEntries = @($check.Entries | Where-Object {
+        $_.FullName -match '(?i)\.(xex|xexp|iso)$'
+    })
+    if ($privateEntries.Count -ne 0) {
         throw 'Private game inputs detected in artifact'
     }
 }
-finally { $check.Dispose() }
-Write-Host '=== SUCCESS: true-source Windows x64 build archived ==='
-Write-Host ((Get-FileHash $zipOut -Algorithm SHA256).Hash)
-Write-Host $zipOut
- }).Count) {
-        throw 'Private game inputs detected in artifact'
-    }
+finally {
+    $check.Dispose()
 }
-finally { $check.Dispose() }
 Write-Host '=== SUCCESS: true-source Windows x64 build archived ==='
 Write-Host ((Get-FileHash $zipOut -Algorithm SHA256).Hash)
 Write-Host $zipOut
