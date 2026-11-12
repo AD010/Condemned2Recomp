@@ -741,10 +741,27 @@ namespace rex::input::condemned2input {
   }
 
   uint32_t Condemned2InputDriver::GetInputManager(){
-    if(isUsingCRT){
-      return kInputManagerCRT;
+    // Prefer the input manager pointer observed in the guest's own GetButton
+    // calls. The old cvar-only guess is wrong if the RexCRT layout and cvar
+    // initialization order diverge; injected Use/Grab then reach a different
+    // manager than the one the game polls. Only accept the two already
+    // established Condemned 2 manager addresses (never arbitrary pointers).
+    const uint32_t live = observedInputManager_.load(std::memory_order_relaxed);
+    if (live == kInputManager || live == kInputManagerCRT)
+      return live;
+    return isUsingCRT ? kInputManagerCRT : kInputManager;
+  }
+
+  void Condemned2InputDriver::ObserveInputManager(uint32_t candidate, uint32_t action) {
+    if (action != 0x57 && action != 0x40)
+      return;
+    if (candidate != kInputManager && candidate != kInputManagerCRT)
+      return;
+    const uint32_t old = observedInputManager_.exchange(candidate, std::memory_order_relaxed);
+    if (old != candidate) {
+      REXLOG_INFO("[c2-input-manager] game GetButton({:#x}) uses {:#x}; legacy guessed {:#x}",
+                  action, candidate, isUsingCRT ? kInputManagerCRT : kInputManager);
     }
-    return kInputManager;
   }
 
   bool Condemned2InputDriver::IsInMenu() { 
@@ -935,6 +952,8 @@ namespace rex::input::condemned2input {
   REX_HOOK_RAW(Input_GetButton){
     uint32_t temp = ctx.r3.u32;
     uint32_t tempB = ctx.r4.u32;
+    if (g_condemned2_input_driver)
+      g_condemned2_input_driver->ObserveInputManager(temp, tempB);
     __imp__Input_GetButton(ctx, base);
     const uint32_t originalValue = ctx.r3.u32;
     double newValue = GetButtonOverrideValue(tempB);
