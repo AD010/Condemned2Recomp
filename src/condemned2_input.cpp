@@ -266,13 +266,18 @@ namespace rex::input::condemned2input {
       };
       for (const char* key : unusedPadBinds) setGuestBind(key, "");
       setGuestBind("keybind_a", "E");
+      // X is the controller's supported forensic-tools command. The 0.6
+      // custom driver directly injected 0x74 and 0x71 together, with extra
+      // tool commands from 1..4, leaving the guest's tool/interaction state
+      // out of sync after changing GPS/camera (upstream issues #66/#71).
+      setGuestBind("keybind_x", "R");
       setGuestBind("keybind_left_trigger", "LMB");
       setGuestBind("keybind_right_trigger", "RMB");
 
       auto mnkDriver = std::make_unique<mnk::MnkInputDriver>(nullptr, 0);
       if (mnkDriver->Setup() == X_STATUS_SUCCESS) {
         input->AddDriver(std::move(mnkDriver));
-        REXLOG_INFO("[c2-legacy-mnk] v0.2.1 keyboard device restored: E=A, LMB=LT, RMB=RT, native camera retained");
+        REXLOG_INFO("[c2-legacy-mnk] v0.2.1 controller input: E=A, R=X (forensics), LMB=LT, RMB=RT; legacy guest trigger routing active");
       } else {
         REXLOG_ERROR("[c2-legacy-mnk] SDK keyboard driver setup failed");
       }
@@ -383,9 +388,14 @@ namespace rex::input::condemned2input {
     // NativeKeyPress(Use/Grab) delivered independent, conflicting commands.
     // This preserves the working health-kit path and needs no real gamepad.
     if (out_state && !isDialogOpen && REXCVAR_GET(condemned2_input_legacy_mnk)) {
-      if (IsNativeBindDown("condemned2_input_use")) {
-        out_state->gamepad.buttons = X_INPUT_GAMEPAD_A;
-      }
+      // Recreate the same complete controller button state even if the SDK
+      // UI listener misses input while SDL owns the mouse capture.
+      uint16_t buttons = 0;
+      if (IsNativeBindDown("condemned2_input_use"))
+        buttons |= X_INPUT_GAMEPAD_A;
+      if (IsNativeBindDown("condemned2_input_forensics"))
+        buttons |= X_INPUT_GAMEPAD_X;
+      out_state->gamepad.buttons = buttons;
       if (IsNativeBindDown("condemned2_input_primary_fire")) {
         out_state->gamepad.left_trigger = 0xFF;
       }
@@ -565,17 +575,26 @@ namespace rex::input::condemned2input {
     // separate actions and E worked for medkits before the A bridge.
 
     Held({activeBinds["condemned2_input_objectives"]}, {0x4f, 0x4e} );
-    // 0x70 is the original ForensicsReturn command when the tool selector
-    // closes. The quick-select keys bypass the controller's ordinary exit
-    // transition; make that transition explicit on the next input update.
-    if (pendingForensicsReturn_ && !IsNativeBindDown("condemned2_input_forensics")) {
-      NativeKeyPress({0x70});
+    // Native forensic commands were a regression introduced after 0.2.1.
+    // On keyboard, X and the tool-wheel's internal 0x71/0x70 transition were
+    // fired simultaneously, sometimes leaving the game in the wrong command
+    // set and disabling weapon pickup and scripted QTE prompts.
+    //
+    // The legacy path now uses R -> X through the merged XInput state (same
+    // command lifecycle as a real controller). Do not also send tool commands
+    // directly. The older native-only path remains available when legacy MnK
+    // is disabled.
+    if (!REXCVAR_GET(condemned2_input_legacy_mnk)) {
+      if (pendingForensicsReturn_ && !IsNativeBindDown("condemned2_input_forensics")) {
+        NativeKeyPress({0x70});
+        pendingForensicsReturn_ = false;
+      }
+      const bool forensicWasDown = activeBinds["condemned2_input_forensics"].prev;
+      Held({activeBinds["condemned2_input_forensics"]}, {0x74, 0x71});
+      if (forensicWasDown && !IsNativeBindDown("condemned2_input_forensics"))
+        pendingForensicsReturn_ = true;
+    } else {
       pendingForensicsReturn_ = false;
-    }
-    const bool forensicWasDown = activeBinds["condemned2_input_forensics"].prev;
-    Held({activeBinds["condemned2_input_forensics"]}, {0x74, 0x71} );
-    if (forensicWasDown && !IsNativeBindDown("condemned2_input_forensics")) {
-      pendingForensicsReturn_ = true;
     }
     // The camera shutter defaults to Mouse1,E, and zoom to Mouse2,V. Without
     // command-set checks they also fire during melee, weapon pickup and QTE,
@@ -590,22 +609,28 @@ namespace rex::input::condemned2input {
       NativeKeyPress({0x8b});
     }
 
-    // Quick-swap (Custom controls)
-    if(Pressed(activeBinds["condemned2_input_tool_uv"])){
-      NativeKeyPress({0x71,0x90,0x96,0xa0});
-      pendingForensicsReturn_ = true;
-    }
-    if(Pressed(activeBinds["condemned2_input_tool_camera"])){
-      NativeKeyPress({0x71,0x98,0x9e,0xa0});
-      pendingForensicsReturn_ = true;
-    }
-    if(Pressed(activeBinds["condemned2_input_tool_spectrometer"])){
-      NativeKeyPress({0x74,0x71,0x97,0xa1});
-      pendingForensicsReturn_ = true;
-    }
-    if(Pressed(activeBinds["condemned2_input_tool_gps"])){
-      NativeKeyPress({0x74,0x71,0x99,0x9f});
-      pendingForensicsReturn_ = true;
+    // Fast-select 1..4 used to bypass the actual wheel-open/close controller
+    // sequence. That is precisely the input-state loss reported in issues
+    // #66/#71. Disable only these unsafe shortcuts while the stable 0.2.1
+    // X-button path is selected; the forensic tool wheel remains usable via R
+    // and the existing arrow-key navigation.
+    if (!REXCVAR_GET(condemned2_input_legacy_mnk)) {
+      if (Pressed(activeBinds["condemned2_input_tool_uv"])) {
+        NativeKeyPress({0x71,0x90,0x96,0xa0});
+        pendingForensicsReturn_ = true;
+      }
+      if (Pressed(activeBinds["condemned2_input_tool_camera"])) {
+        NativeKeyPress({0x71,0x98,0x9e,0xa0});
+        pendingForensicsReturn_ = true;
+      }
+      if (Pressed(activeBinds["condemned2_input_tool_spectrometer"])) {
+        NativeKeyPress({0x74,0x71,0x97,0xa1});
+        pendingForensicsReturn_ = true;
+      }
+      if (Pressed(activeBinds["condemned2_input_tool_gps"])) {
+        NativeKeyPress({0x74,0x71,0x99,0x9f});
+        pendingForensicsReturn_ = true;
+      }
     }
     g_condemned2_input_driver->SetMouseWheelY(0); //Reset wheel after a frame.
   }
