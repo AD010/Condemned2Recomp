@@ -396,12 +396,20 @@ namespace rex::input::condemned2input {
       if (IsNativeBindDown("condemned2_input_forensics"))
         buttons |= X_INPUT_GAMEPAD_X;
       out_state->gamepad.buttons = buttons;
-      if (IsNativeBindDown("condemned2_input_primary_fire")) {
+      const bool left = IsNativeBindDown("condemned2_input_primary_fire");
+      const bool right = IsNativeBindDown("condemned2_input_secondary_fire");
+      const auto now = std::chrono::steady_clock::now();
+      // One simultaneous click can be seen for only ~9ms in log 038,
+      // shorter than one 60Hz game frame. Extend an *actual* LT+RT chord
+      // just long enough for the guest to sample it. Single-button swings
+      // remain unchanged; no native Grab event is double-dispatched.
+      if (left && right)
+        grabChordGraceUntil_ = now + std::chrono::milliseconds(90);
+      const bool bufferedGrabChord = now < grabChordGraceUntil_;
+      if (left || bufferedGrabChord)
         out_state->gamepad.left_trigger = 0xFF;
-      }
-      if (IsNativeBindDown("condemned2_input_secondary_fire")) {
+      if (right || bufferedGrabChord)
         out_state->gamepad.right_trigger = 0xFF;
-      }
     }
 
     //Update controller
