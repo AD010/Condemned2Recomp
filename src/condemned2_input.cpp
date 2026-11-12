@@ -353,8 +353,10 @@ namespace rex::input::condemned2input {
       last_dy = 0;
       last_add_dx = 0;
       last_add_dy = 0;
-      // Drop stale input edges when PC overlays take focus.
+      // Drop stale input edges and timed input chords when overlays take focus.
       for (auto& [name, bind] : activeBinds) bind.prev = false;
+      forensicWheelWasDown_ = false;
+      grabChordGraceUntil_ = {};
     }
 
     // Dispatch once per device update so hold/release transitions cannot latch.
@@ -765,8 +767,11 @@ namespace rex::input::condemned2input {
       return;
     if (candidate != kInputManager && candidate != kInputManagerCRT)
       return;
-    const uint32_t old = observedInputManager_.exchange(candidate, std::memory_order_relaxed);
-    if (old != candidate) {
+    // Lock the first verified guest manager for this session; do not oscillate
+    // between UI and player contexts if the guest also polls the other layout.
+    uint32_t unknown = 0;
+    if (observedInputManager_.compare_exchange_strong(unknown, candidate,
+                                                      std::memory_order_relaxed)) {
       REXLOG_INFO("[c2-input-manager] game GetButton({:#x}) uses {:#x}; legacy guessed {:#x}",
                   action, candidate, isUsingCRT ? kInputManagerCRT : kInputManager);
     }
