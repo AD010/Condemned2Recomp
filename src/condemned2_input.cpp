@@ -435,17 +435,21 @@ namespace rex::input::condemned2input {
     // The gamepad sends trigger DOWN, HOLD, and UP. Sending only a one-frame
     // mouse click prevents its dual-trigger (LT+RT) grab/finisher path from
     // seeing both triggers held together.
-    if(mouse_clicks.isMouseLeft){
-      NativeKeyPress({0x47, 0x79, 0x1c});
-    }
-    if(mouse_clicks.isMouseRight){
-      NativeKeyPress({0x11, 0x7a});
-    }
-    if(mouse_clicks.isMouseRightPressed){
-      NativeKeyPress({0xbc}); // NoteInputTime is an edge, not a held trigger.
-      // Only the active forensic task may accept CancelTask.
-      if (IsNativeCommandEnabled(0x65))
-        NativeKeyPress({0x65});
+    // In the proven 0.2.1 input path, trigger presses are read from the
+    // controller state, *not* simultaneously injected as seven native engine
+    // commands. Double dispatch interrupts melee transitions and QTE chords.
+    if (!REXCVAR_GET(condemned2_input_legacy_mnk)) {
+      if (mouse_clicks.isMouseLeft) {
+        NativeKeyPress({0x47, 0x79, 0x1c});
+      }
+      if (mouse_clicks.isMouseRight) {
+        NativeKeyPress({0x11, 0x7a});
+      }
+      if (mouse_clicks.isMouseRightPressed) {
+        NativeKeyPress({0xbc});
+        if (IsNativeCommandEnabled(0x65))
+          NativeKeyPress({0x65});
+      }
     }
     // Real Xbox finisher: LT+RT together. Expose it for keyboard/mouse as
     // simultaneous LMB+RMB; preserve E/Q as optional contextual aliases.
@@ -490,8 +494,9 @@ namespace rex::input::condemned2input {
     // contextual pickup and scripted grab action at the mission_04 checkpoint.
     // Only issue native menu commands when an actual game HUD/menu is active.
     if (hudOrMenu &&
-        (Pressed(activeBinds["condemned2_input_use"]) ||
-         Pressed(activeBinds["menu_enter"]))) {
+        (Pressed(activeBinds["menu_enter"]) ||
+         (!REXCVAR_GET(condemned2_input_legacy_mnk) &&
+          Pressed(activeBinds["condemned2_input_use"])))) {
       NativeKeyPress({
           0xa6, 0x5b, 0x87, 0xb5, 0xa7, 0xb7, 0xba, 0x5d
       });
@@ -748,6 +753,24 @@ namespace rex::input::condemned2input {
     }
   }
   
+  // Restore verbatim command-ID routing from the last known working 0.2.1.
+  // It was removed in 0.3.x/0.6.0 while the custom input driver started
+  // injecting native commands directly. Axis, button and PlayerInput must
+  // agree on the mapping or context-dependent actions can become unsynced.
+  uint32_t GetLegacyTriggerOverrideValue(uint32_t btn, bool isAxis = false) {
+    if (!REXCVAR_GET(condemned2_input_legacy_mnk) ||
+        g_condemned2_input_driver->IsUsingMeleeWeapon())
+      return btn;
+    if (!isAxis) {
+      if (btn == 0x11 || btn == 0x65) return 0x47;
+      if (btn == 0x1c) return 0x11;
+    } else {
+      if (btn == 0x47) return 0x65;
+      if (btn == 0x65) return 0x47;
+    }
+    return btn;
+  }
+
   double GetAxisOverrideValue(uint32_t btn){
     //Left Stick Handling / Movement Velocity
     std::pair<double,double> moveVel = g_condemned2_input_driver->MoveVel();
@@ -763,7 +786,10 @@ namespace rex::input::condemned2input {
       return 0;
     }
 
-    // Mouse Button Handling
+    // Mouse-button analogue override was introduced after 0.2.1.
+    // Do not replace the original guest trigger axis when the controller
+    // bridge is active: leave QTE, pickups and melee to the game's input.
+    if (!REXCVAR_GET(condemned2_input_legacy_mnk)) {
     MouseBind mouseClick = g_condemned2_input_driver->MouseClick();
     if(mouseClick.isMouseMiddle && g_condemned2_input_driver->IsUsingMeleeWeapon()){ //Alt block
       if (btn == 0x79 || btn == 0x7a){
@@ -777,6 +803,8 @@ namespace rex::input::condemned2input {
     }else if (btn == 0x65){ // CancelTask only if the guest explicitly enables it
       return g_condemned2_input_driver->IsNativeCommandEnabled(0x65) && mouseClick.isMouseRight;
     }
+
+    } // End post-0.2.1 native mouse-action overrides.
 
     // Radio/TV Antenna Tuning
     // This uses a soft additive mouse input so users can feel slight weight in adjusting antennas.
@@ -834,6 +862,9 @@ namespace rex::input::condemned2input {
     // currently says false (as seen throughout mission_04 in log 030).
     // With the v0.2.1 keyboard controller restored, use the guest's original
     // button state instead of overlaying a separate native command state.
+    // In legacy mode no other 0.6-era GetButtonOverrideValue should run either:
+    // the exact 0.2.1 implementation delegated all button results to guest.
+    if (REXCVAR_GET(condemned2_input_legacy_mnk)) return 0;
     if (!REXCVAR_GET(condemned2_input_legacy_mnk) && btn == 0x57) {
       return g_condemned2_input_driver->IsNativeBindDown("condemned2_input_use");
     }
@@ -873,8 +904,9 @@ namespace rex::input::condemned2input {
 
   //Input Event Functions
   REX_HOOK_RAW(Input_GetAxis) {
-    uint32_t newID = ctx.r4.u32;
+    uint32_t newID = GetLegacyTriggerOverrideValue(ctx.r4.u32, true);
     double newValue = GetAxisOverrideValue(newID);
+    ctx.r4.u32 = newID;
     __imp__Input_GetAxis(ctx, base);
     if( newValue != 0 ){
       ctx.f1.f64 = newValue;
@@ -904,6 +936,7 @@ namespace rex::input::condemned2input {
   REX_HOOK_RAW(Input_GetButton){
     uint32_t temp = ctx.r3.u32;
     uint32_t tempB = ctx.r4.u32;
+    ctx.r4.u32 = GetLegacyTriggerOverrideValue(tempB);
     __imp__Input_GetButton(ctx, base);
     const uint32_t originalValue = ctx.r3.u32;
     double newValue = GetButtonOverrideValue(tempB);
@@ -922,6 +955,7 @@ namespace rex::input::condemned2input {
     if(g_condemned2_input_driver->IsDebugging()){
       REXLOG_INFO("[condemned2_input][Input_PlayerInput] {:#x} {:#x}", ctx.r3.u64, id);
     }
+    ctx.r4.u32 = GetLegacyTriggerOverrideValue(id);
     __imp__Input_PlayerInput(ctx, base);
     if (REXCVAR_GET(condemned2_input_trace_use_grab) &&
         (id == 0x57 || id == 0x40))
