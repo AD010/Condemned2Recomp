@@ -507,18 +507,14 @@ namespace rex::input::condemned2input {
           0xa6, 0x5b, 0x87, 0xb5, 0xa7, 0xb7, 0xba, 0x5d
       });
     }
-    // The game's command set decides whether world Use (0x57) is valid.
-    // Always maintain its DOWN/HOLD/UP lifecycle, even while the HUD, GPS or
-    // forensic UI reports a menu state. Otherwise A works for health packs
-    // and doors, but weapon pickup and scripted finishers never see Use.
-    // Regression fix: do NOT replace this native command with synthetic A.
-    // The A-only experiment prevented even health-pack pickup (log 030).
-    // Keep Down/Hold/Up for Use in all modes.
-    // In legacy MnK mode, E is the SDK's XInput A button (as in v0.2.1).
-    // Never send a second direct 0x57 action for the same key; pickup and
-    // finisher context must be resolved by the original controller pipeline.
-    if (!REXCVAR_GET(condemned2_input_legacy_mnk))
-      Held({activeBinds["condemned2_input_use"], activeBinds["menu_enter"]}, {0x57});
+    // Regression in #19-#25: E was present in the SDL keyboard state and
+    // mapped to synthetic XInput A, but world Use (0x57) was never dispatched
+    // when legacy_mnk=true. This also broke health packs with a visible A
+    // prompt. Restore the *working* native key lifecycle regardless of MnK;
+    // leave the existing gamepad A state intact for context/UI support.
+    // Do not gate on IsCommandEnabled: it reports false at the checkpoint
+    // even when an A interaction prompt is on screen (log 038).
+    Held({activeBinds["condemned2_input_use"], activeBinds["menu_enter"]}, {0x57});
 
     //Menu back
     if(Pressed(activeBinds["menu_go_back"])){ //buttons |= X_INPUT_GAMEPAD_B;
@@ -712,14 +708,14 @@ namespace rex::input::condemned2input {
     // Release keys absent from this update, including forensic tools and one-shot taps.
     for (int32_t key : activeNativeKeys) {
       if (std::find(requestedNativeKeys.begin(), requestedNativeKeys.end(), key) == requestedNativeKeys.end()) {
-        if (REXCVAR_GET(condemned2_input_trace_use_grab) && (key == 0x57 || key == 0x40))
+        if (key == 0x57 || (REXCVAR_GET(condemned2_input_trace_use_grab) && key == 0x40))
           REXLOG_INFO("[c2-native-action] UP id={:#x}", key);
         ReleaseBind(keyManager, key);
       }
     }
     for (int32_t key : requestedNativeKeys) {
       if (std::find(activeNativeKeys.begin(), activeNativeKeys.end(), key) == activeNativeKeys.end()) {
-        if (REXCVAR_GET(condemned2_input_trace_use_grab) && (key == 0x57 || key == 0x40))
+        if (key == 0x57 || (REXCVAR_GET(condemned2_input_trace_use_grab) && key == 0x40))
           REXLOG_INFO("[c2-native-action] DOWN id={:#x} enabled_hint={}", key, IsNativeCommandEnabled(key));
         PressBind(keyManager, key);
       }
@@ -847,8 +843,15 @@ namespace rex::input::condemned2input {
   }
 
   double GetButtonOverrideValue(uint32_t btn){
-    if (g_condemned2_input_driver->GetMouseLookType() == MouseLookType::DISABLED  // No changes if disabled.
-    || !g_condemned2_input_driver->IsUsingPCControls() ) // Are using the gamepad?
+    // World interaction is a keyboard action, not a mouse-look action.
+    // After calling the guest's Input_GetButton, supply 0x57 when E is held
+    // irrespective of legacy_mnk or mouse-look mode. Original gamepad state
+    // remains untouched when the host keyboard key is not down.
+    if (btn == 0x57 && g_condemned2_input_driver->IsUsingPCControls() &&
+        g_condemned2_input_driver->IsNativeBindDown("condemned2_input_use"))
+      return 1.0;
+    if (g_condemned2_input_driver->GetMouseLookType() == MouseLookType::DISABLED
+    || !g_condemned2_input_driver->IsUsingPCControls() )
       return 0;
 
     // v0.2.1 received both keyboard edge events and button polling from the
@@ -860,9 +863,6 @@ namespace rex::input::condemned2input {
     // currently says false (as seen throughout mission_04 in log 030).
     // With the v0.2.1 keyboard controller restored, use the guest's original
     // button state instead of overlaying a separate native command state.
-    if (!REXCVAR_GET(condemned2_input_legacy_mnk) && btn == 0x57) {
-      return g_condemned2_input_driver->IsNativeBindDown("condemned2_input_use");
-    }
     if (!REXCVAR_GET(condemned2_input_legacy_mnk) && btn == 0x40) {
       const MouseBind triggers = g_condemned2_input_driver->MouseClick();
       return (triggers.isMouseLeft && triggers.isMouseRight) ||
