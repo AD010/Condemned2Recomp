@@ -8,6 +8,7 @@
 #include <rex/ui/window_listener.h>
 
 #include <cstdint>
+#include <atomic>
 #include <mutex>
 #include <queue>
 #include <string>
@@ -60,6 +61,7 @@ namespace rex::input::condemned2input{
          void OnWindowAvailable(rex::ui::Window* window) override;
          void PCControls();
          uint32_t GetInputManager();
+         void ObserveInputManager(uint32_t candidate, uint32_t action);
          bool IsNativeCommandEnabled(uint32_t action);
          bool IsNativeBindDown(const char* bindName);
 
@@ -134,6 +136,7 @@ namespace rex::input::condemned2input{
 
          //Custom input
          bool isUsingCRT = false;
+         std::atomic<uint32_t> observedInputManager_{0};
          bool blockFirstFrame = false;
          bool hasMeleeWeapon = false;
          double move_dx = 0;
