@@ -4,19 +4,10 @@
 # CONDEMNED2_CI_INPUTS_TOKEN = Contents: Read and write on the ONE private
 # repository AD010/Condemned2-CI-Inputs (needed to fetch ZIP & upload Release).
 name: Condemned 2 TRUE Windows x64 Recomp (private inputs and output)
+# Only the user explicitly authorizes starting Actions; source commits must
+# never launch builds, upload artifacts, or incur runner work automatically.
 on:
   workflow_dispatch:
-  push:
-    branches:
-      - fix/input-weapon-pickup-qte-060
-    paths:
-      - '.github/workflows/build-input-hotfix.yml'
-      - 'ci/build_true_win64_release.ps1'
-      - 'src/condemned2_input.cpp'
-      - 'src/condemned2_graphics.cpp'
-      - 'src/condemned2_input.h'
-      - 'CMakeLists.txt'
-      - 'config/condemned2recomp_config_tu.toml'
 
 permissions:
   contents: read
