@@ -9,6 +9,7 @@
 
 #include <cstdint>
 #include <atomic>
+#include <chrono>
 #include <mutex>
 #include <queue>
 #include <string>
@@ -137,6 +138,7 @@ namespace rex::input::condemned2input{
          //Custom input
          bool isUsingCRT = false;
          std::atomic<uint32_t> observedInputManager_{0};
+         std::chrono::steady_clock::time_point grabChordGraceUntil_{};
          bool blockFirstFrame = false;
          bool hasMeleeWeapon = false;
          double move_dx = 0;
