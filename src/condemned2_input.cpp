@@ -491,29 +491,23 @@ namespace rex::input::condemned2input {
     Held({activeBinds["menu_nav_right"]}, {0x85, 0x8e} );
     Held({activeBinds["menu_nav_left"]}, {0x84, 0x8d} );
 
-    //Confirm, Use Commands
-    // HUD / forensic overlays are not proof that world interactions are off.
-    // In particular, IsInMenu() may remain true after a tool-wheel transition.
-    const bool hudOrMenu = IsInMenu();
-    // E was previously sending eight menu-confirm commands even in gameplay.
-    // That is not how v0.2.1 routes A, and can consume/interfere with the
-    // contextual pickup and scripted grab action at the mission_04 checkpoint.
-    // Only issue native menu commands when an actual game HUD/menu is active.
-    if (hudOrMenu &&
-        (Pressed(activeBinds["menu_enter"]) ||
-         (!REXCVAR_GET(condemned2_input_legacy_mnk) &&
-          Pressed(activeBinds["condemned2_input_use"])))) {
-      NativeKeyPress({
-          0xa6, 0x5b, 0x87, 0xb5, 0xa7, 0xb7, 0xba, 0x5d
-      });
+    // Context-sensitive A actions: the native PC path originally delivered
+    // several A aliases on E/Enter. In #21-25 these were restricted to HUD
+    // menus, which also broke health kits showing an A prompt. They are
+    // different command sets, not duplicate invocations of the same action:
+    // 0x57 = world Use, 0x87 = menu A, 0xa7 = in-game A confirm,
+    // 0xb5/0xb7 = dialogue A, 0x5d = decision A, 0xa3 = terminal A.
+    // IDs come from the reviewed XEX PlayerInput/CPlayerUI action mapping.
+    // Crucially, do NOT inject 0xa6 / 0x5b (Y), or 0xba (B) on E: those
+    // cross-button aliases can activate an unrelated command set.
+    const bool usePressed = Pressed(activeBinds["condemned2_input_use"]);
+    const bool enterPressed = Pressed(activeBinds["menu_enter"]);
+    if (usePressed || enterPressed) {
+      NativeKeyPress({0x87, 0xa7, 0xb5, 0xb7, 0x5d, 0xa3});
+      REXLOG_INFO("[c2-use-aliases] E/Enter -> world A context aliases; hud={}", IsInMenu());
     }
-    // Regression in #19-#25: E was present in the SDL keyboard state and
-    // mapped to synthetic XInput A, but world Use (0x57) was never dispatched
-    // when legacy_mnk=true. This also broke health packs with a visible A
-    // prompt. Restore the *working* native key lifecycle regardless of MnK;
-    // leave the existing gamepad A state intact for context/UI support.
-    // Do not gate on IsCommandEnabled: it reports false at the checkpoint
-    // even when an A interaction prompt is on screen (log 038).
+    // Use is a hold action: scanning and scripted moves require genuine
+    // DOWN/HOLD/UP transitions. Keep the normal XInput A state in parallel.
     Held({activeBinds["condemned2_input_use"], activeBinds["menu_enter"]}, {0x57});
 
     //Menu back
@@ -587,6 +581,17 @@ namespace rex::input::condemned2input {
         pendingForensicsReturn_ = true;
     } else {
       pendingForensicsReturn_ = false;
+      // On a real controller, releasing X closes the forensic wheel; the
+      // guest issues ForensicsReturn (0x70) as part of its context transition.
+      // The native keyboard variant used by the validated input experiments
+      // explicitly sent that transition on key release. Preserve it here
+      // while keeping the SDK's normal X-down/X-up state for R.
+      const bool toolsDown = IsNativeBindDown("condemned2_input_forensics");
+      if (forensicWheelWasDown_ && !toolsDown) {
+        NativeKeyPress({0x70});
+        REXLOG_INFO("[c2-forensic-transition] R released; ForensicsReturn(0x70)");
+      }
+      forensicWheelWasDown_ = toolsDown;
     }
     // The camera shutter defaults to Mouse1,E, and zoom to Mouse2,V. Without
     // command-set checks they also fire during melee, weapon pickup and QTE,
