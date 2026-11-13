@@ -1,102 +1,143 @@
-"""Validate authoritative upstream input integration before Windows recompilation.
+"""Source-only regression checks for psxrestore's 2026-11-13 input overhaul.
 
-This manual-CI guard checks psxrestore/Condemned2Recomp's 2026-11-13
-9df903a source-level forensic-tool fix plus local 0x65 safety gate, and the 2026-11-13 mouse midhook correction 6411f7e,
-plus the locally retained checkpoint prompt guard. This is NOT a game test.
+A successful compiler run is NOT proof that A pickup prompts or LT+RT boss
+finishers work at mission_04; those still require a real in-game check.
+This test does not read private Xbox game binaries or user save files.
 """
 from pathlib import Path
+import subprocess
 
-root = Path(__file__).resolve().parents[1]
-input_cpp = (root / "src/condemned2_input.cpp").read_text(encoding="utf-8")
-input_h = (root / "src/condemned2_input.h").read_text(encoding="utf-8")
-midhooks = (root / "config/condemned2recomp_config_midhooks.toml").read_text(encoding="utf-8")
-graphics = (root / "src/condemned2_graphics.cpp").read_text(encoding="utf-8")
-workflow = (root / ".github/workflows/build-input-hotfix.yml").read_text(encoding="utf-8")
+ROOT = Path(__file__).resolve().parents[1]
 
-def require(ok, message):
-    if not ok:
+def source(path):
+    return (ROOT / path).read_text(encoding="utf-8")
+
+def require(condition, message):
+    if not condition:
         raise AssertionError(message)
 
-require("auto& forensicBind = activeBinds[\"condemned2_input_forensics\"]" in input_cpp,
-        "Upstream forensic button state is missing")
-require("std::chrono::steady_clock::now() - forensicBind.pressTime > std::chrono::seconds(2)" in input_cpp,
-        "Upstream two-second tool-wheel threshold is missing")
-require("NativeKeyPress({0x74});" in input_cpp and
-        "ReleaseBind(GetInputManager(), 0x74);" in input_cpp,
-        "Forensic R action 0x74 must have a genuine DOWN/UP pair")
-require("forensicsWheelCommandSent_" in input_cpp and
-        "NativeKeyPress({0x71});" in input_cpp and
-        "forensicsNowHeld && forensicBind.prev" in input_cpp,
-        "Timed forensic panel command 0x71 must use its own one-shot edge")
-require("NativeKeyPress({0x70});" in input_cpp,
-        "Upstream forensic return 0x70 is missing")
-require("pressTime = std::chrono::steady_clock::now()" in input_cpp and
-        "std::chrono::steady_clock::time_point pressTime" in input_h,
-        "Forensic held-button timing state is missing")
-require("if (release) {" in input_cpp and
-        "ReleaseBind(keyManager, static_cast<uint32_t>(k));" in input_cpp,
-        "NativeKeyPress release=true must dispatch guest Input_KeyUp")
-require("releaseActive(\"condemned2_input_forensics\", {0x74})" in input_cpp and
-        "releaseActive(\"condemned2_input_tool_gps\"" in input_cpp and
-        "[c2-forensics] F4/dialog: release held tools" in input_cpp and
-        "mouse_clicks = {};" in input_cpp,
-        "Dialog/focus capture must release forensic and mouse button state")
-require("worldUseArmed_" in input_cpp and
-        "ReleaseBind(GetInputManager(), 0x57);" in input_cpp and
-        "REX_IMPORT(Input_KeyUp, ReleaseBind" in input_cpp,
-        "World Use 0x57 needs true guest Input_KeyUp on release")
-require('NativeKeyPress({0x47, 0x79, 0x1c})' in input_cpp and
-        '0x11, 0x7a, 0xbc' in input_cpp,
-        "Original mouse attack commands were changed")
-# Local safety patch on top of upstream 9df903a: RMB must not send
-# CancelTask(0x65) while an unrelated gameplay command set is active.
-# The two attack actions remain unconditional; only the cancel action is gated.
-require("REX_IMPORT(Input_IsCommandEnabled, IsCommandEnabled" in input_cpp and
-        "if ((IsCommandEnabled(GetInputManager(), 0x65) & 0xff) != 0)" in input_cpp,
-        "RMB CancelTask 0x65 must be gated on the active forensic command set")
-# Native keyboard/mouse has no XInput combination device: both real attack
-# buttons must generate the 0x40 CS_Grab action, independently of normal melee.
-require("grabChordActive_" in input_h and
-        "NativeKeyPress({0x40});" in input_cpp and
-        "ReleaseBind(GetInputManager(), 0x40);" in input_cpp,
-        "LT+RT grab must have distinct DOWN/UP edges (0x40)")
-require("if (btn == 0x40 && g_condemned2_input_driver->IsUsingPCControls() &&" in input_cpp and
-        "!g_condemned2_input_driver->IsInputDialogOpen()" in input_cpp and
-        "bool IsInputDialogOpen() const { return isDialogOpen; }" in input_h and
-        "const MouseBind buttons = g_condemned2_input_driver->MouseClick();" in input_cpp and
-        "return buttons.isMouseLeft && buttons.isMouseRight;" in input_cpp,
-        "Guest Input_GetButton(0x40) must see both physical attack buttons")
-require('quickTool("condemned2_input_tool_uv"' in input_cpp and
-        'quickTool("condemned2_input_tool_camera"' in input_cpp and
-        'quickTool("condemned2_input_tool_spectrometer"' in input_cpp and
-        'quickTool("condemned2_input_tool_gps"' in input_cpp and
-        "ReleaseBind(GetInputManager(), static_cast<uint32_t>(id));" in input_cpp and
-        "[c2-quicktool]" in input_cpp,
-        "Quick forensic tool 1-4 must release native aliases and close the panel")
-require("[c2-forensics] panel-open 0x71" in input_cpp and
-        "[c2-grab] LT+RT overlap:" in input_cpp and
-        "[c2-world-use] E_pressed" in input_cpp,
-        "Input transition diagnostics are missing")
+cpp = source("src/condemned2_input.cpp")
+header = source("src/condemned2_input.h")
+tu = source("config/condemned2recomp_config_tu.toml")
+midhooks = source("config/condemned2recomp_config_midhooks.toml")
+graphics = source("src/condemned2_graphics.cpp")
+cheats = source("src/condemned2_cheats.cpp")
+widgets = source("src/ui/condemned2_widgets.h")
+launcher = source("src/ui/condemned2_launcher.cpp")
+workflow = source(".github/workflows/build-input-hotfix.yml")
+cmake = source("CMakeLists.txt")
 
-require("MnkInputDriver" not in input_cpp,
-        "Do not overlay the experimental 0.2.1 MNK keyboard driver on the newly-fixed upstream native input")
-require("void Mouse_SensitivityCurveNative(PPCRegister&" in input_cpp and
-        "address = 0x82306EF4" in midhooks and
-        'registers = ["f1"]' in midhooks,
-        "Upstream native mouse sensitivity hook does not match the current source")
-require("REX_HOOK_RAW(HudSpectatorModeChange)" in graphics and
-        "condemned2_sp_spectator_prompt_fix" in graphics,
-        "The retained single-player checkpoint HUD prompt fix is missing")
+def contains_all(blob, *tokens):
+    return all(token in blob for token in tokens)
+
+# Post-0.6.0 upstream rewrite, ActionIDs, newer mouse pipeline and TU hook.
+require(contains_all(header, "enum ActionID : uint32_t",
+                     "PLAYER_USE = 0x57", "PLAYER_GRAB = 0x40",
+                     "FORENSICS_OPEN = 0x71", "FORENSICS_QUICK = 0x70",
+                     "void TimedBind(", "void ReleaseCapturedInputs()"),
+        "Missing action identifiers or native input lifecycle")
+require(contains_all(cpp, "last_accum_dx += dx", "last_accum_dy += dy",
+                     "void Mouse_SensitivityCurveNative(PPCRegister&",
+                     "REX_HOOK_RAW(Camera_MouseLook)",
+                     "ResetAccumMouse();"),
+        "Missing upstream accumulated native mouse input")
+require(contains_all(tu, '0x82306DD8 = {name="Camera_MouseLook"}',
+                     '0x8234BEC0 = {name="Input_KeyUp"}',
+                     '0x8234C388 = {name="Input_IsCommandEnabled"}',
+                     '0x824149D8 = {name="HudSpectatorModeChange"}'),
+        "Incorrect TU hook addresses for current source")
+require(contains_all(midhooks, "address = 0x82306EF4",
+                     'name = "Mouse_SensitivityCurveNative"',
+                     'registers = ["f1"]'),
+        "Upstream sensitivity midhook 6411f7e was lost")
+
+# Input_KeyUp must NOT be disguised as Input_KeyDown.
+require(contains_all(cpp, "REX_IMPORT(Input_KeyUp, Input_ReleaseBind",
+                     "if (release) {",
+                     "Input_ReleaseBind(keyManager, static_cast<uint32_t>(k));"),
+        "Game button UP was not dispatched to Input_KeyUp")
+
+# Use is a single action even when E and Enter are both down.
+require(contains_all(cpp, "const bool useDown = IsBindDown(useBind) || IsBindDown(enterMenuBind);",
+                     "heldUseActions_.push_back(ActionID::PLAYER_USE)",
+                     "ActivateBind(heldUseActions_);",
+                     "ActivateBind(heldUseActions_, true);",
+                     "[c2-use] A/Use DOWN", "[c2-use] A/Use UP"),
+        "Contextual A/Use must preserve the same aliases through UP")
+require("bool useHeld_ = false;" in header and
+        "std::vector<int32_t> heldUseActions_;" in header,
+        "The shared E/Enter action state is missing")
+
+# Timed forensic tool selection and all four quick wheel shortcuts.
+require(contains_all(cpp, "forensicsPanelOpen_ = true",
+                     "forensicsPanelOpen_ = false",
+                     "ActivateBind({holdKeycode}, true);",
+                     "ActivateBind({onKeycode}, true);",
+                     "ActivateBind({offKeycode});",
+                     'quickTool("condemned2_input_tool_uv"',
+                     'quickTool("condemned2_input_tool_camera"',
+                     'quickTool("condemned2_input_tool_spectrometer"',
+                     'quickTool("condemned2_input_tool_gps"'),
+        "Tool command UP/return path was lost")
+
+# Do not cancel investigation on every unrelated RMB attack.
+require(contains_all(cpp, "REX_IMPORT(Input_IsCommandEnabled, Input_CommandEnabled",
+                     "ActionID::RIGHT_TRIGGER_PRESS, ActionID::TRIGGER_HOLD",
+                     "Input_CommandEnabled(GetInputManager(), ActionID::CANCEL_INVESTIGATION)",
+                     "ActivateBind({ActionID::CANCEL_INVESTIGATION});"),
+        "RMB CancelTask must be conditional while normal melee is retained")
+
+# Both mouse buttons need an actual guest grab action and release.
+require(contains_all(cpp, "const bool bothTriggers = isMouseLeft && isMouseRight;",
+                     "ActivateBind({ActionID::PLAYER_GRAB});",
+                     "ActivateBind({ActionID::PLAYER_GRAB}, true);",
+                     "const MouseBind cached = g_condemned2_input_driver->MouseClick();",
+                     "return cached.isMouseLeft && cached.isMouseRight;",
+                     "[c2-grab] LT+RT overlap"),
+        "Native LT+RT Grab 0x40 state not preserved")
+require(contains_all(header, "bool grabChordActive_ = false;",
+                     "bool IsInputDialogOpen() const"),
+        "Grab chord must not survive F4 dialog capture")
+require(contains_all(cpp, "ReleaseCapturedInputs();",
+                     "void Condemned2InputDriver::ReleaseCapturedInputs()",
+                     "mouse_clicks = {};"),
+        "Guest action releases are missing when settings capture input")
+
+# Repair checkpoint spectator prompt issue without replacing official HUD.
+require(contains_all(graphics, "REX_HOOK_RAW(HudSpectatorModeChange)",
+                     "condemned2_sp_spectator_prompt_fix"),
+        "Single-player checkpoint HUD prompt protection missing")
+require(contains_all(cpp, "[c2-guest-action]", "[c2-hud]",
+                     "[c2-forensics]", "[c2-quicktool]"),
+        "Context-action diagnostics missing; future mission_04 log would be blind")
+
+# All author interface/QoL changes since v0.6.0 have been migrated.
+require(contains_all(widgets, "ImGui::PushFont(font, fontSize)",
+                     "static bool AddMenuButton("),
+        "Latest upstream DPI-responsive widgets missing")
+require(contains_all(launcher, "io.DisplaySize.y * 0.044",
+                     "io.DisplaySize.y * 0.868f"),
+        "Upstream proportional launcher layout missing")
+require(contains_all(cheats, "GRENADEOVERRIDE Taser_Level03",
+                     "flashlightintensity"),
+        "Upstream taser/flashlight fix missing")
+require("GPU_PLUGINS xenos" in cmake,
+        "Windows source build must retain Xenos GPU plugin linkage")
+
+# SDK gitlink must track author's latest 546a082a exactly.
+result = subprocess.run(["git", "ls-tree", "HEAD", "thirdparty/rexglue-sdk"],
+                        cwd=ROOT, capture_output=True, text=True, check=True)
+require("160000 commit 546a082a4356173635f6c40510a41ff53e518b5a" in result.stdout,
+        "ReXGlue-SDK gitlink is not the author's v0.10.1 pin")
+
+# Source-only edits must never start CI. The one-time authorized run can
+# temporarily have a push trigger restricted to this workflow file alone.
 require("on:\n  workflow_dispatch:" in workflow,
-        "CI must support explicit manual workflow dispatch")
-# A temporary one-time workflow-file-only push is used by the GitHub app
-# connector (which lacks workflow_dispatch). It is created exclusively for
-# a user-authorized build, then immediately removed in the next commit.
-# The checked-out triggering revision therefore still contains that push
-# stanza. Reject any broad push trigger or any path other than this workflow.
+        "Existing workflow_dispatch trigger is required")
 if "\n  push:" in workflow:
-    require("      - fix/input-weapon-pickup-qte-060" in workflow and
-            "      - '.github/workflows/build-input-hotfix.yml'" in workflow and
+    require(contains_all(workflow,
+                         "      - fix/input-weapon-pickup-qte-060",
+                         "      - '.github/workflows/build-input-hotfix.yml'") and
             "      - 'src/condemned2_input.cpp'" not in workflow,
-            "CI push trigger is too broad for a one-time authorized build")
-print("PASS: native forensic 0x71 edge, guest E KeyUp, grab 0x40, CancelTask gate, author input, HUD guard")
+            "Temporary user-authorized CI trigger may target ONLY this workflow file")
+print("PASS: upstream 47b6508 input+UI, SDK 546a082a, A Use, grab QTE, forensic UP, HUD")
