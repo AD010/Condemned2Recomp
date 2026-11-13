@@ -139,15 +139,20 @@ Condemned 2 Recomp Windows x64 REAL SOURCE BUILD
 Public source: AD010/Condemned2Recomp
 Branch: fix/input-weapon-pickup-qte-060
 Commit: $revision
-Input source/header/mouse midhooks: exact upstream psxrestore/Condemned2Recomp 9df903a1510cfdd14bb42347f70078dc1e9ad27c (2026-11-13).
-Other modules and Windows CI packaging: AD010 build integration.
+Base upstream: psxrestore/Condemned2Recomp 6411f7e541a613579e27fc127e2b9d7656123a58 (2026-11-13).
+Mouse sensitivity midhook 0x82306EF4/f1: exact upstream 6411f7e.
+Native input: upstream 9df903a plus AD010 fixes for complete E/R KeyUp,
+forensic wheel release, quick-tool close, LT+RT grab, and RMB CancelTask.
+Single-player spectator HUD protection: AD010 integration.
+Windows compilation, private inputs, runtime DLLs, and ZIP: AD010 CI.
 Compiler: $clangVersion
 Generated from user-provided original XEX and Title Update XEXP.
 Packaged with public Condemned2Recomp 0.6.0 support files.
 Game input files are not included.
-This is an experimental upstream post-v0.6.0 source build. The author fixed
-forensic tool mode and reports pickup prompts restored. Health packs, melee
-and doll factory finisher QTE remain UNVERIFIED without in-game testing.
+Experimental build. User verified health-pack pickup in build 27/29
+but NOT melee weapon pickup, all context prompts, or the doll-factory
+finisher QTE. Changes made after build 29 are not yet game-tested.
+Windows loader smoke test proves process loading, not gameplay correctness.
 "@
 Set-Content -LiteralPath (Join-Path $stage 'TRUE_SOURCE_BUILD.txt') -Value $buildInfo -Encoding utf8
 $zipOut = Join-Path $OutputDir 'Condemned2Recomp-RealSource-InputFix-Windows-x64.zip'
