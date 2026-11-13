@@ -133,6 +133,9 @@ namespace rex::input::condemned2input{
          bool isUsingCRT = false;
          bool blockFirstFrame = false;
          bool hasMeleeWeapon = false;
+         // Panel command 0x71 is a timed action distinct from the original
+         // 0x74 key edge; never reuse Bind::prev for both.
+         bool forensicsWheelCommandSent_ = false;
          double move_dx;
          double move_dy;
          MouseBind mouse_clicks;
