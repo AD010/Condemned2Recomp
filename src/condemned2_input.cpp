@@ -294,6 +294,8 @@ namespace rex::input::condemned2input {
       auto mnkDriver = std::make_unique<mnk::MnkInputDriver>(nullptr, 0);
       if (mnkDriver->Setup() == X_STATUS_SUCCESS) {
         input->AddDriver(std::move(mnkDriver));
+        // Preserve the exact startup marker from the successful 0.2.1 logs.
+        REXLOG_INFO("[condemned2_input] MNK Input Driver Initialized");
         REXLOG_INFO("[c2-legacy-mnk] strict 0.2.1 input: MNK owns pad/WASD/A/X/LT/RT; custom driver supplies native mouse camera only");
       } else {
         REXLOG_ERROR("[c2-legacy-mnk] SDK keyboard driver setup failed");
