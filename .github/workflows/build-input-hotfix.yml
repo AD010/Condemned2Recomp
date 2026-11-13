@@ -8,12 +8,6 @@ name: Condemned 2 TRUE Windows x64 Recomp (private inputs and output)
 # never launch builds, upload artifacts, or incur runner work automatically.
 on:
   workflow_dispatch:
-  # Explicit user-authorized single build #30; workflow-file-only trigger.
-  push:
-    branches:
-      - fix/input-weapon-pickup-qte-060
-    paths:
-      - '.github/workflows/build-input-hotfix.yml'
 
 permissions:
   contents: read
