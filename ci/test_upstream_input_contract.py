@@ -1,0 +1,49 @@
+"""Validate authoritative upstream input integration before Windows recompilation.
+
+This manual-CI guard checks psxrestore/Condemned2Recomp's 2026-11-13
+9df903a source-level forensic-tool fix and the 2026-11-12 mouse fixes,
+plus the locally retained checkpoint prompt guard. This is NOT a game test.
+"""
+from pathlib import Path
+
+root = Path(__file__).resolve().parents[1]
+input_cpp = (root / "src/condemned2_input.cpp").read_text(encoding="utf-8")
+input_h = (root / "src/condemned2_input.h").read_text(encoding="utf-8")
+midhooks = (root / "config/condemned2recomp_config_midhooks.toml").read_text(encoding="utf-8")
+graphics = (root / "src/condemned2_graphics.cpp").read_text(encoding="utf-8")
+workflow = (root / ".github/workflows/build-input-hotfix.yml").read_text(encoding="utf-8")
+
+def require(ok, message):
+    if not ok:
+        raise AssertionError(message)
+
+require("auto& forensicBind = activeBinds[\"condemned2_input_forensics\"]" in input_cpp,
+        "Upstream forensic button state is missing")
+require("forensicsElapsed > std::chrono::seconds(2)" in input_cpp,
+        "Upstream two-second tool-wheel threshold is missing")
+require("Held({forensicBind}, {0x74} )" in input_cpp,
+        "Upstream forensic tool control 0x74 is missing")
+require("Held({forensicBind}, {0x71} )" in input_cpp,
+        "Upstream conditional inventory panel 0x71 is missing")
+require("NativeKeyPress({0x70});" in input_cpp,
+        "Upstream forensic return 0x70 is missing")
+require("pressTime = std::chrono::steady_clock::now()" in input_cpp and
+        "std::chrono::steady_clock::time_point pressTime" in input_h,
+        "Forensic held-button timing state is missing")
+require('Held({useBind}, {0x57} )' in input_cpp,
+        "Original Use key hold/release path is missing")
+require('NativeKeyPress({0x47, 0x79, 0x1c})' in input_cpp and
+        'NativeKeyPress({0x11, 0x7a})' in input_cpp,
+        "Original mouse attack commands were changed")
+require("MnkInputDriver" not in input_cpp,
+        "Do not overlay the experimental 0.2.1 MNK keyboard driver on the newly-fixed upstream native input")
+require("void Mouse_SensitivityCurveNative(PPCRegister&" in input_cpp and
+        "address = 0x82306EE4" in midhooks and
+        'registers = ["f31"]' in midhooks,
+        "Upstream native mouse sensitivity hook does not match the current source")
+require("REX_HOOK_RAW(HudSpectatorModeChange)" in graphics and
+        "condemned2_sp_spectator_prompt_fix" in graphics,
+        "The retained single-player checkpoint HUD prompt fix is missing")
+require("on:\n  workflow_dispatch:" in workflow and "\n  push:" not in workflow,
+        "CI must be explicitly authorized manually")
+print("PASS: upstream 9df903a forensic/input fix, mouse sensitivity and checkpoint HUD guard")
