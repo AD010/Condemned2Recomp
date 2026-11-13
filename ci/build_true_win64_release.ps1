@@ -139,20 +139,24 @@ Condemned 2 Recomp Windows x64 REAL SOURCE BUILD
 Public source: AD010/Condemned2Recomp
 Branch: fix/input-weapon-pickup-qte-060
 Commit: $revision
-Base upstream: psxrestore/Condemned2Recomp 6411f7e541a613579e27fc127e2b9d7656123a58 (2026-11-13).
-Mouse sensitivity midhook 0x82306EF4/f1: exact upstream 6411f7e.
-Native input: upstream 9df903a plus AD010 fixes for complete E/R KeyUp,
-forensic wheel release, quick-tool close, LT+RT grab, and RMB CancelTask.
+Base upstream: psxrestore/Condemned2Recomp 47b65086408083f2430eab0f19ea9edbeaaafe39 (2026-11-13).
+Input rewrite: upstream 680b7bc with cumulative mouse, action IDs and A/Use.
+SDK gitlink: upstream 546a082a4356173635f6c40510a41ff53e518b5a (v0.10.1).
+UI/launcher: upstream 47b6508 proportional scaling changes.
+Mouse sensitivity midhook 0x82306EF4/f1: upstream 6411f7e.
+Additional AD010 patches: true guest Input_KeyUp, logical E/Enter A/Use,
+forensic 0x74/0x71/0x70 lifecycle, quick-tool close, context-gated
+CancelTask, combined LT+RT contextual Grab(0x40), F4 input cleanup.
 Single-player spectator HUD protection: AD010 integration.
-Windows compilation, private inputs, runtime DLLs, and ZIP: AD010 CI.
+Windows compiler, private inputs, runtime DLLs, and ZIP: AD010 CI.
 Compiler: $clangVersion
 Generated from user-provided original XEX and Title Update XEXP.
 Packaged with public Condemned2Recomp 0.6.0 support files.
 Game input files are not included.
-Experimental build. User verified health-pack pickup in build 27/29
-but NOT melee weapon pickup, all context prompts, or the doll-factory
-finisher QTE. Changes made after build 29 are not yet game-tested.
-Windows loader smoke test proves process loading, not gameplay correctness.
+Experimental build. Health pack pickup worked on a prior version;
+melee weapon A prompt, response prompts, and doll-factory LT+RT finisher
+remain UNVERIFIED until a real checkpoint mission_04 gameplay test.
+Build success and Windows loader smoke test are NOT proof of these fixes.
 "@
 Set-Content -LiteralPath (Join-Path $stage 'TRUE_SOURCE_BUILD.txt') -Value $buildInfo -Encoding utf8
 $zipOut = Join-Path $OutputDir 'Condemned2Recomp-RealSource-InputFix-Windows-x64.zip'
