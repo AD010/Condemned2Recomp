@@ -23,15 +23,19 @@ require("forensicsElapsed > std::chrono::seconds(2)" in input_cpp,
         "Upstream two-second tool-wheel threshold is missing")
 require("Held({forensicBind}, {0x74} )" in input_cpp,
         "Upstream forensic tool control 0x74 is missing")
-require("Held({forensicBind}, {0x71} )" in input_cpp,
-        "Upstream conditional inventory panel 0x71 is missing")
+require("forensicsWheelCommandSent_" in input_cpp and
+        "NativeKeyPress({0x71});" in input_cpp and
+        "forensicsNowHeld && forensicBind.prev" in input_cpp,
+        "Timed forensic panel command 0x71 must use its own one-shot edge")
 require("NativeKeyPress({0x70});" in input_cpp,
         "Upstream forensic return 0x70 is missing")
 require("pressTime = std::chrono::steady_clock::now()" in input_cpp and
         "std::chrono::steady_clock::time_point pressTime" in input_h,
         "Forensic held-button timing state is missing")
-require('Held({useBind}, {0x57} )' in input_cpp,
-        "Original Use key hold/release path is missing")
+require("worldUseArmed_" in input_cpp and
+        "ReleaseBind(GetInputManager(), 0x57);" in input_cpp and
+        "REX_IMPORT(Input_KeyUp, ReleaseBind" in input_cpp,
+        "World Use 0x57 needs true guest Input_KeyUp on release")
 require('NativeKeyPress({0x47, 0x79, 0x1c})' in input_cpp and
         '0x11, 0x7a, 0xbc' in input_cpp,
         "Original mouse attack commands were changed")
