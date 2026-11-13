@@ -84,6 +84,7 @@ REX_EXTERN(__imp__IsMeleeWeapon); // Checks if player's current weapon is a mele
 //Imported functions used for PC controls!
 REX_IMPORT(Input_KeyDown, PressBind, uint32_t(uint32_t, uint32_t, uint32_t, uint32_t, uint32_t, uint32_t));
 REX_IMPORT(Input_KeyHold, HoldBind, uint32_t(uint32_t, uint32_t));
+REX_IMPORT(Input_KeyUp, ReleaseBind, uint32_t(uint32_t, uint32_t));
 REX_IMPORT(Input_IsCommandEnabled, IsCommandEnabled, uint32_t(uint32_t, uint32_t));
 
 namespace rex::input::condemned2input {
@@ -369,45 +370,32 @@ namespace rex::input::condemned2input {
     Held({activeBinds["menu_nav_right"], activeBinds["condemned2_input_move_right"]}, {0x85, 0x8e} );
     Held({activeBinds["menu_nav_left"], activeBinds["condemned2_input_move_left"]}, {0x84, 0x8d} );
 
-    //Confirm, Use Commands
+    // Confirm and World Use (0x57) are different contexts. In upstream
+    // 9df, Pressed(useBind) consumes Bind::prev before Held(useBind) can
+    // inspect it. Consequently the native release edge is never delivered.
     auto& useBind = activeBinds["condemned2_input_use"];
     auto& enterMenuBind = activeBinds["menu_enter"];
-    if(IsInMenu()){
-      if(Pressed(useBind) || Pressed(enterMenuBind)){ //buttons |= X_INPUT_GAMEPAD_B;
-        NativeKeyPress({
-          //Submit menu confirm
-          0xa6,
-          0x5b,
-          //Menu confirm
-          0x87,
-          0xb5,
-          0xa7, //In-game menu confirm
-          0xb7, // Used for dialogs in fight club
-          0xba, // Close tutorial dialogs
-          0x5d // Choose investigation choice
-        });
+    const bool usePressed = Pressed(useBind);
+    const bool enterPressed = Pressed(enterMenuBind);
+    const bool inMenu = IsInMenu();
+    if (inMenu) {
+      if (usePressed || enterPressed) {
+        NativeKeyPress({0xa6, 0x5b, 0x87, 0xb5, 0xa7, 0xb7, 0xba, 0x5d});
       }
-    }else{
-      //Menu interaction
-      if(Pressed(useBind) || Pressed(enterMenuBind)){ //buttons |= X_INPUT_GAMEPAD_B;
-        NativeKeyPress({
-          //Submit menu confirm
-          0xa6,
-          0x5b,
-          //Menu confirm
-          0x87,
-          0xb5,
-          0xa7, //In-game menu confirm
-          0xb7, // Used for dialogs in fight club
-          0xba, // Close tutorial dialogs
-          0x57,
-          0x5d // Choose investigation choice
-        });
-      }
-      //Player use action
-      Held({useBind}, {0x57} );
+    } else if (usePressed || enterPressed) {
+      // Preserve the author's 9df one-shot world A and menu alias events.
+      // These initial presses are known to work for medkit pickup.
+      NativeKeyPress({0xa6, 0x5b, 0x87, 0xb5, 0xa7, 0xb7, 0xba, 0x57, 0x5d});
+      worldUseArmed_ = true;
     }
-    
+    // Input_KeyUp is the guest OFF callback at 0x8234BEC0. In contrast,
+    // NativeKeyPress(..., true) still calls KeyDown, not the OFF callback.
+    if (worldUseArmed_ && !IsDown(useBind) && !IsDown(enterMenuBind)) {
+      ReleaseBind(GetInputManager(), 0x57);
+      worldUseArmed_ = false;
+      REXLOG_INFO("[c2-world-use] genuine OFF 0x57 sent on E/Enter release");
+    }
+
     //Menu back
     if(Pressed(activeBinds["menu_go_back"])){ //buttons |= X_INPUT_GAMEPAD_B;
       NativeKeyPress({
