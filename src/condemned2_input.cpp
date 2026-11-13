@@ -87,6 +87,8 @@ REX_EXTERN(__imp__IsMeleeWeapon); // Checks if player's current weapon is a mele
 //Imported functions used for PC controls!
 REX_IMPORT(Input_KeyDown, Input_PressBind, uint32_t(uint32_t, uint32_t, uint32_t, uint32_t, uint32_t, uint32_t));
 REX_IMPORT(Input_KeyHold, Input_HoldBind, uint32_t(uint32_t, uint32_t));
+REX_IMPORT(Input_KeyUp, Input_ReleaseBind, uint32_t(uint32_t, uint32_t));
+REX_IMPORT(Input_IsCommandEnabled, Input_CommandEnabled, uint32_t(uint32_t, uint32_t));
 
 namespace rex::input::condemned2input {
   namespace {
@@ -291,6 +293,9 @@ namespace rex::input::condemned2input {
     if(!isDialogOpen){
       PCControls();
     }else{
+      // Complete all guest input releases when F4/launcher captures focus.
+      // Clearing only host bind flags leaves the game in a stale command set.
+      ReleaseCapturedInputs();
       //Reset all movement when a dialog is active
       move_dx = 0;
       move_dy = 0;
@@ -342,7 +347,22 @@ namespace rex::input::condemned2input {
       ActivateBind({ActionID::LEFT_TRIGGER, ActionID::LEFT_TRIGGER_PRESS, ActionID::TRIGGER_HOLD, ActionID::USE_WEAPON});
     }
     if(mouse_clicks.isMouseRightPressed){
-      ActivateBind({ActionID::RIGHT_TRIGGER, ActionID::RIGHT_TRIGGER_PRESS, ActionID::TRIGGER_HOLD, ActionID::CANCEL_INVESTIGATION});
+      // Keep ordinary RMB melee/ADS independent from CancelTask. Only
+      // cancel an active investigation when the guest permits 0x65.
+      ActivateBind({ActionID::RIGHT_TRIGGER, ActionID::RIGHT_TRIGGER_PRESS, ActionID::TRIGGER_HOLD});
+      if ((Input_CommandEnabled(GetInputManager(), ActionID::CANCEL_INVESTIGATION) & 0xff) != 0)
+        ActivateBind({ActionID::CANCEL_INVESTIGATION});
+    }
+    const bool bothTriggers = isMouseLeft && isMouseRight;
+    if (bothTriggers && !grabChordActive_) {
+      grabChordActive_ = true;
+      ActivateBind({ActionID::PLAYER_GRAB});
+      REXLOG_INFO("[c2-grab] LT+RT overlap DOWN 0x40; guest_enabled_hint={}",
+                  (Input_CommandEnabled(GetInputManager(), ActionID::PLAYER_GRAB) & 0xff) != 0);
+    } else if (!bothTriggers && grabChordActive_) {
+      grabChordActive_ = false;
+      ActivateBind({ActionID::PLAYER_GRAB}, true);
+      REXLOG_INFO("[c2-grab] LT+RT overlap UP 0x40");
     }
 
     //Mouse movement
@@ -370,34 +390,32 @@ namespace rex::input::condemned2input {
     HoldBind({activeBinds["menu_nav_right"], activeBinds["condemned2_input_move_right"]}, {ActionID::MENU_NAV_RIGHT, ActionID::MENU_NAV_CAT_RIGHT} );
     HoldBind({activeBinds["menu_nav_left"], activeBinds["condemned2_input_move_left"]}, {ActionID::MENU_NAV_LEFT, ActionID::MENU_NAV_CAT_LEFT} );
 
-    //Confirm, Use Commands
+    // Both E and Enter represent one logical A/Use action. The upstream
+    // HoldBind loop consumed the first key's edge, could release a command
+    // while its other physical key remained held, and released whichever
+    // aliases were active NOW instead of those sent on initial DOWN.
     auto& useBind = activeBinds["condemned2_input_use"];
     auto& enterMenuBind = activeBinds["menu_enter"];
-    std::vector<int32_t> useBinds = {
-      ActionID::SUBMIT,
-      ActionID::SUBMIT_B,
-      ActionID::CONFIRM,
-      ActionID::CONFIRM_B,
-      ActionID::INGAME_CONFIRM, 
-      ActionID::FIGHTCLUB,
-      ActionID::TUTORIAL,
-      ActionID::PLAYER_USE, 
-      ActionID::DECISION
-    };
-    if(IsInMenu()){
-      useBinds = {
-        ActionID::SUBMIT,
-        ActionID::SUBMIT_B,
-        ActionID::CONFIRM,
-        ActionID::CONFIRM_B,
-        ActionID::INGAME_CONFIRM,
-        ActionID::FIGHTCLUB,
-        ActionID::TUTORIAL, 
-        ActionID::DECISION
+    const bool useDown = IsBindDown(useBind) || IsBindDown(enterMenuBind);
+    if (useDown && !useHeld_) {
+      useHeld_ = true;
+      heldUseActions_ = {
+        ActionID::SUBMIT, ActionID::SUBMIT_B, ActionID::CONFIRM,
+        ActionID::CONFIRM_B, ActionID::INGAME_CONFIRM,
+        ActionID::FIGHTCLUB, ActionID::TUTORIAL, ActionID::DECISION
       };
+      if (!IsInMenu()) heldUseActions_.push_back(ActionID::PLAYER_USE);
+      ActivateBind(heldUseActions_);
+      REXLOG_INFO("[c2-use] A/Use DOWN; player_use={} enabled_hint={}",
+                  !IsInMenu(),
+                  (Input_CommandEnabled(GetInputManager(), ActionID::PLAYER_USE) & 0xff) != 0);
+    } else if (!useDown && useHeld_) {
+      ActivateBind(heldUseActions_, true); // Input_KeyUp for original aliases.
+      REXLOG_INFO("[c2-use] A/Use UP; guest commands released");
+      heldUseActions_.clear();
+      useHeld_ = false;
     }
-    HoldBind({useBind, enterMenuBind}, useBinds );
-    
+
     //Menu back
     if(IsBindPressed("menu_go_back")){
       ActivateBind({
@@ -555,15 +573,29 @@ namespace rex::input::condemned2input {
   }
 
   void Condemned2InputDriver::TimedBind( Bind& b, int32_t holdKeycode, int32_t onKeycode, int32_t offKeycode, float duration) {
-    bool bindPressed = b.isHeld;
-    HoldBind({b}, {holdKeycode} );
-    bool isBindOpen = IsBindDown(b);
-    auto bindElapsed = std::chrono::steady_clock::now() - b.pressTime;
-    bool timerElapsed = bindElapsed > std::chrono::duration<float>(duration);
-    if(isBindOpen && timerElapsed ){
-      HoldBind({b}, {onKeycode} );
-    }else if(!isBindOpen && !timerElapsed && bindPressed && !b.isHeld){
-      ActivateBind({offKeycode});
+    // Long-hold must have its OWN edge. Reusing b.isHeld after sending
+    // 0x74 made the author's second HoldBind(0x71) a no-op.
+    const bool nowDown = IsBindDown(b);
+    if (nowDown && !b.isHeld) {
+      b.isHeld = true;
+      b.pressTime = std::chrono::steady_clock::now();
+      forensicsPanelOpen_ = false;
+      ActivateBind({holdKeycode});
+      REXLOG_INFO("[c2-forensics] R DOWN 0x74");
+    }
+    if (nowDown && b.isHeld && !forensicsPanelOpen_ &&
+        std::chrono::steady_clock::now() - b.pressTime >= std::chrono::duration<float>(duration)) {
+      ActivateBind({onKeycode});
+      forensicsPanelOpen_ = true;
+      REXLOG_INFO("[c2-forensics] long-hold R opened 0x71");
+    }
+    if (!nowDown && b.isHeld) {
+      ActivateBind({holdKeycode}, true);
+      if (forensicsPanelOpen_) ActivateBind({onKeycode}, true);
+      ActivateBind({offKeycode}); // Return to gameplay command context.
+      REXLOG_INFO("[c2-forensics] R UP; closed panel={}", forensicsPanelOpen_);
+      b.isHeld = false;
+      forensicsPanelOpen_ = false;
     }
   }
 
@@ -574,8 +606,10 @@ namespace rex::input::condemned2input {
       if(k == 0x0){
         continue;
       }
-      Input_PressBind(keyManager, k, 0x0, 0x0, 0x0, 0x0);
-      if(!release){
+      if (release) {
+        Input_ReleaseBind(keyManager, static_cast<uint32_t>(k));
+      } else {
+        Input_PressBind(keyManager, k, 0x0, 0x0, 0x0, 0x0);
         Input_HoldBind(keyManager, k);
       }
     }
@@ -640,8 +674,12 @@ namespace rex::input::condemned2input {
     }
     else if (btn == ActionID::LEFT_TRIGGER_PRESS || btn == ActionID::USE_WEAPON){ // Left click
       return mouseClick.isMouseLeft;
-    }else if (btn == ActionID::RIGHT_TRIGGER_PRESS || btn == ActionID::CANCEL_INVESTIGATION){ // Right click
+    }else if (btn == ActionID::RIGHT_TRIGGER_PRESS) { // Right click
       return mouseClick.isMouseRight;
+    } else if (btn == ActionID::CANCEL_INVESTIGATION) {
+      return (Input_CommandEnabled(g_condemned2_input_driver->GetInputManager(),
+                                   ActionID::CANCEL_INVESTIGATION) & 0xff) != 0
+             ? mouseClick.isMouseRight : 0.0;
     }
 
     // Radio/TV Antenna Tuning
@@ -689,6 +727,14 @@ namespace rex::input::condemned2input {
   }
 
   double GetButtonOverrideValue(uint32_t btn){
+    // Special grabs require both LT+RT even if mouse-look is disabled;
+    // never poll SDL here (game input hooks may run on a separate thread).
+    if (btn == ActionID::PLAYER_GRAB &&
+        g_condemned2_input_driver->IsUsingPCControls() &&
+        !g_condemned2_input_driver->IsInputDialogOpen()) {
+      const MouseBind cached = g_condemned2_input_driver->MouseClick();
+      return cached.isMouseLeft && cached.isMouseRight;
+    }
     if (g_condemned2_input_driver->GetMouseLookType() == MouseLookType::DISABLED  // No changes if disabled.
     || !g_condemned2_input_driver->IsUsingPCControls() ) // Are using the gamepad?
       return 0;
@@ -709,7 +755,12 @@ namespace rex::input::condemned2input {
     if(g_condemned2_input_driver->IsUsingMeleeWeapon()){ //Alt block
       isMiddleClicked = mouseClick.isMouseMiddle;
     }
-    if (btn == ActionID::RIGHT_TRIGGER || btn == ActionID::RIGHT_TRIGGER_PRESS || btn == ActionID::CANCEL_INVESTIGATION ) {
+    if (btn == ActionID::CANCEL_INVESTIGATION) {
+      return (Input_CommandEnabled(g_condemned2_input_driver->GetInputManager(),
+                                   ActionID::CANCEL_INVESTIGATION) & 0xff) != 0
+             ? (mouseClick.isMouseRight || mouseClick.isMouseRightPressed) : 0.0;
+    }
+    if (btn == ActionID::RIGHT_TRIGGER || btn == ActionID::RIGHT_TRIGGER_PRESS) {
       return mouseClick.isMouseRight || mouseClick.isMouseRightPressed || isMiddleClicked;
     }else if(btn == ActionID::LEFT_TRIGGER || btn == ActionID::LEFT_TRIGGER_PRESS || btn == ActionID::USE_WEAPON ){ 
       return mouseClick.isMouseLeft || mouseClick.isMouseLeftPressed || isMiddleClicked;
