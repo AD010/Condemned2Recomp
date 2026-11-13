@@ -31,6 +31,9 @@ function Exec([string]$Program, [string[]]$Arguments) {
     if ($LASTEXITCODE -ne 0) { throw "Tool exited with code $LASTEXITCODE : $Program" }
 }
 
+Write-Host '=== Source-level v0.2.1 input regression checks ==='
+Exec 'python' @((Join-Path $SourceRoot 'ci/test_input_021_contract.py'))
+
 Write-Host '=== Private inputs integrity check ==='
 Assert-Hash $InputZip $expectedZip
 New-Item -ItemType Directory -Path $OutputDir -Force | Out-Null
