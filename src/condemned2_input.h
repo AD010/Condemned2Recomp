@@ -61,6 +61,7 @@ namespace rex::input::condemned2input{
          X_RESULT GetDeviceKeystroke(DeviceId id, uint32_t flags, X_INPUT_KEYSTROKE* out_keystroke) override;
          void OnWindowAvailable(rex::ui::Window* window) override;
          void PCControls();
+         void UpdateNativeMouseLook();
          uint32_t GetInputManager();
          void ObserveInputManager(uint32_t candidate, uint32_t action);
          bool IsNativeCommandEnabled(uint32_t action);
