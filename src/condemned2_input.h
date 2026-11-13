@@ -137,6 +137,7 @@ namespace rex::input::condemned2input{
          // 0x74 key edge; never reuse Bind::prev for both.
          bool forensicsWheelCommandSent_ = false;
          bool worldUseArmed_ = false;
+         bool grabChordActive_ = false;
          double move_dx;
          double move_dy;
          MouseBind mouse_clicks;
