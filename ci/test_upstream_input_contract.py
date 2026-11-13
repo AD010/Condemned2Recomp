@@ -1,7 +1,7 @@
 """Validate authoritative upstream input integration before Windows recompilation.
 
 This manual-CI guard checks psxrestore/Condemned2Recomp's 2026-11-13
-9df903a source-level forensic-tool fix plus local 0x65 safety gate, and the 2026-11-12 mouse fixes,
+9df903a source-level forensic-tool fix plus local 0x65 safety gate, and the 2026-11-13 mouse midhook correction 6411f7e,
 plus the locally retained checkpoint prompt guard. This is NOT a game test.
 """
 from pathlib import Path
@@ -33,6 +33,14 @@ require("NativeKeyPress({0x70});" in input_cpp,
 require("pressTime = std::chrono::steady_clock::now()" in input_cpp and
         "std::chrono::steady_clock::time_point pressTime" in input_h,
         "Forensic held-button timing state is missing")
+require("if (release) {" in input_cpp and
+        "ReleaseBind(keyManager, static_cast<uint32_t>(k));" in input_cpp,
+        "NativeKeyPress release=true must dispatch guest Input_KeyUp")
+require("releaseActive(\"condemned2_input_forensics\", {0x74})" in input_cpp and
+        "releaseActive(\"condemned2_input_tool_gps\"" in input_cpp and
+        "[c2-forensics] F4/dialog: release held tools" in input_cpp and
+        "mouse_clicks = {};" in input_cpp,
+        "Dialog/focus capture must release forensic and mouse button state")
 require("worldUseArmed_" in input_cpp and
         "ReleaseBind(GetInputManager(), 0x57);" in input_cpp and
         "REX_IMPORT(Input_KeyUp, ReleaseBind" in input_cpp,
@@ -71,8 +79,8 @@ require("[c2-forensics] panel-open 0x71" in input_cpp and
 require("MnkInputDriver" not in input_cpp,
         "Do not overlay the experimental 0.2.1 MNK keyboard driver on the newly-fixed upstream native input")
 require("void Mouse_SensitivityCurveNative(PPCRegister&" in input_cpp and
-        "address = 0x82306EE4" in midhooks and
-        'registers = ["f31"]' in midhooks,
+        "address = 0x82306EF4" in midhooks and
+        'registers = ["f1"]' in midhooks,
         "Upstream native mouse sensitivity hook does not match the current source")
 require("REX_HOOK_RAW(HudSpectatorModeChange)" in graphics and
         "condemned2_sp_spectator_prompt_fix" in graphics,
