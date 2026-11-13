@@ -36,6 +36,7 @@ namespace rex::input::condemned2input{
       PLAYER_STATUS = 0x3d,
       PLAYER_TASER = 0x3e,
       PLAYER_THROW = 0x3f,
+      PLAYER_GRAB = 0x40, // Contextual LT+RT finisher, separate from melee attacks
       USE_WEAPON = 0x47,
       OBJECTIVES_BEGIN = 0x4f, 
       OBJECTIVES_END = 0x4e,
@@ -123,6 +124,7 @@ namespace rex::input::condemned2input{
          void HoldBind( std::initializer_list<std::reference_wrapper<Bind>> binds, std::vector<int32_t> keycodes, bool down = false, bool pressed = false);
          void ActivateBind(std::vector<int32_t> keycodes, bool release = false);
          void TimedBind( Bind& b, int32_t holdKeycode, int32_t onKeycode, int32_t offKeycode, float duration = 0.5f);
+         void ReleaseCapturedInputs(); // F4/launcher/focus capture must leave no guest holds
          std::unordered_map<std::string, Bind>& GetActiveBinds() { return activeBinds; }
          Bind ParseBind(const std::string& s);
          bool IsBindDown(const Bind &b);
@@ -136,6 +138,7 @@ namespace rex::input::condemned2input{
          void SetMouseLookTypeFromString( std::string mouseMode );
          MouseLookType GetMouseLookType() { return mouseLookType; }
          MouseBind MouseClick() { return mouse_clicks; }
+         bool IsInputDialogOpen() const { return isDialogOpen; }
          std::pair<double, double> MoveVel() { return {move_dx, move_dy}; }
          std::pair<double, double> RawMouse() { return {last_dx, last_dy}; }
          std::pair<double, double> AdditiveMouse() { return {last_add_dx, last_add_dy}; }
@@ -166,6 +169,10 @@ namespace rex::input::condemned2input{
          Condemned2::Condemned2Hook *_hooks;
          uint32_t packet_number_ = 0;
          bool isDialogOpen = true;
+         bool useHeld_ = false;
+         bool forensicsPanelOpen_ = false;
+         bool grabChordActive_ = false;
+         std::vector<int32_t> heldUseActions_;
          bool isInMenu = false;
          bool isTuning; //Hey, wanna listen to some tunes?
          bool isUsingPCControls = true;
