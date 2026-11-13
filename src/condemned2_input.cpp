@@ -265,6 +265,23 @@ namespace rex::input::condemned2input {
         "keybind_back", "keybind_start", "keybind_guide"
       };
       for (const char* key : unusedPadBinds) setGuestBind(key, "");
+      // Reproduce the working user-provided 0.2.1 log 001 controller map.
+      // The custom driver must NOT separately inject actions in this mode.
+      setGuestBind("keybind_lstick_up", "W");
+      setGuestBind("keybind_lstick_down", "S");
+      setGuestBind("keybind_lstick_left", "A");
+      setGuestBind("keybind_lstick_right", "D");
+      setGuestBind("keybind_left_shoulder", "Shift+W");
+      setGuestBind("keybind_right_shoulder", "G");
+      setGuestBind("keybind_rstick_press", "Space");
+      setGuestBind("keybind_start", "Esc,Return");
+      setGuestBind("keybind_back", "Tab,Backspace");
+      setGuestBind("keybind_dpad_up", "Up,1");
+      setGuestBind("keybind_dpad_down", "Down,2");
+      setGuestBind("keybind_dpad_left", "Left,3");
+      setGuestBind("keybind_dpad_right", "Right,4");
+      setGuestBind("keybind_b", "F");
+      setGuestBind("keybind_y", "H");
       setGuestBind("keybind_a", "E");
       // X is the controller's supported forensic-tools command. The 0.6
       // custom driver directly injected 0x74 and 0x71 together, with extra
@@ -277,7 +294,7 @@ namespace rex::input::condemned2input {
       auto mnkDriver = std::make_unique<mnk::MnkInputDriver>(nullptr, 0);
       if (mnkDriver->Setup() == X_STATUS_SUCCESS) {
         input->AddDriver(std::move(mnkDriver));
-        REXLOG_INFO("[c2-legacy-mnk] v0.2.1 controller input: E=A, R=X (forensics), LMB=LT, RMB=RT; legacy guest trigger routing active");
+        REXLOG_INFO("[c2-legacy-mnk] strict 0.2.1 input: MNK owns pad/WASD/A/X/LT/RT; custom driver supplies native mouse camera only");
       } else {
         REXLOG_ERROR("[c2-legacy-mnk] SDK keyboard driver setup failed");
       }
@@ -342,9 +359,18 @@ namespace rex::input::condemned2input {
       }
     }
 
-    //PC Controls aren't active with any dialog is open.
+    // Strict 0.2.1 input architecture: the Mnk device alone owns the guest
+    // controller, while this driver only supplies native camera mouse deltas.
+    // Calling PCControls() in this mode injected gameplay actions a second
+    // time and let the forensic wheel overwrite the active command context.
     if(!isDialogOpen){
-      PCControls();
+      if (REXCVAR_GET(condemned2_input_legacy_mnk)) {
+        UpdateNativeMouseLook();
+        move_dx = move_dy = 0;
+        mouse_clicks = {};
+      } else {
+        PCControls();
+      }
     }else{
       //Reset all movement when a dialog is active
       move_dx = 0;
@@ -382,44 +408,34 @@ namespace rex::input::condemned2input {
       }
     }
 
-    // Device-state fallback for the checkpoint interaction regression:
-    // The UI-event-driven SDK MnkInputDriver can miss physical key events
-    // when SDL captures the pointer. XInput state from this custom device is
-    // merged (OR/max) with Mnk's state by InputSystem, so duplicating these
-    // exact buttons does not produce duplicate guest commands. In contrast,
-    // NativeKeyPress(Use/Grab) delivered independent, conflicting commands.
-    // This preserves the working health-kit path and needs no real gamepad.
-    if (out_state && !isDialogOpen && REXCVAR_GET(condemned2_input_legacy_mnk)) {
-      // Recreate the same complete controller button state even if the SDK
-      // UI listener misses input while SDL owns the mouse capture.
-      uint16_t buttons = 0;
-      if (IsNativeBindDown("condemned2_input_use"))
-        buttons |= X_INPUT_GAMEPAD_A;
-      if (IsNativeBindDown("condemned2_input_forensics"))
-        buttons |= X_INPUT_GAMEPAD_X;
-      out_state->gamepad.buttons = buttons;
-      const bool left = IsNativeBindDown("condemned2_input_primary_fire");
-      const bool right = IsNativeBindDown("condemned2_input_secondary_fire");
-      const auto now = std::chrono::steady_clock::now();
-      // One simultaneous click can be seen for only ~9ms in log 038,
-      // shorter than one 60Hz game frame. Extend an *actual* LT+RT chord
-      // just long enough for the guest to sample it. Single-button swings
-      // remain unchanged; no native Grab event is double-dispatched.
-      if (left && right)
-        grabChordGraceUntil_ = now + std::chrono::milliseconds(90);
-      const bool bufferedGrabChord = now < grabChordGraceUntil_;
-      if (left || bufferedGrabChord)
-        out_state->gamepad.left_trigger = 0xFF;
-      if (right || bufferedGrabChord)
-        out_state->gamepad.right_trigger = 0xFF;
-    }
-
+    // 0.2.1: this custom device has no gameplay buttons at all in MnK mode.
+    // Do not merge another synthetic A/X/LT/RT on top of the real MNK
+    // driver; its key-down/up events alone are the authoritative pad state.
     //Update controller
     packet_number_++; // Increment input packet number
     if (out_state) {
       out_state->packet_number = packet_number_;
     }
     return X_ERROR_SUCCESS;
+  }
+
+  // Native camera path from the original 0.2.1 custom input driver.
+  // In strict legacy mode no custom game actions are emitted: the SDK's
+  // MnkInputDriver owns every Xbox 360 gameplay button and trigger.
+  void Condemned2InputDriver::UpdateNativeMouseLook() {
+    //Mouse movement
+    float dx = 0.0f, dy = 0.0f;
+    SDL_GetRelativeMouseState(&dx, &dy);
+    double sensitivity = REXCVAR_GET(condemned2_input_mouse_sensitivity);
+    // Mouse look
+    last_dx = dx * sensitivity;
+    last_dy = dy * sensitivity;
+    // Additive mouse delta
+    last_add_dx += last_dx * 0.01f;
+    last_add_dy += -last_dy * 0.01f;
+    last_add_dx = std::clamp(last_add_dx, -1.0, 1.0);
+    last_add_dy = std::clamp(last_add_dy, -1.0, 1.0);
+
   }
 
   void Condemned2InputDriver::PCControls(){
@@ -479,18 +495,7 @@ namespace rex::input::condemned2input {
     if (!REXCVAR_GET(condemned2_input_legacy_mnk) &&
         isMouseLeft && isMouseRight)
       NativeKeyPress({0x40});
-    //Mouse movement
-    float dx = 0.0f, dy = 0.0f;
-    SDL_GetRelativeMouseState(&dx, &dy);
-    double sensitivity = REXCVAR_GET(condemned2_input_mouse_sensitivity);
-    // Mouse look
-    last_dx = dx * sensitivity;
-    last_dy = dy * sensitivity;
-    // Additive mouse delta
-    last_add_dx += last_dx * 0.01f;
-    last_add_dy += -last_dy * 0.01f;
-    last_add_dx = std::clamp(last_add_dx, -1.0, 1.0);
-    last_add_dy = std::clamp(last_add_dy, -1.0, 1.0);
+    UpdateNativeMouseLook();
 
     // Only arrow keys and mouse wheel control navigation / forensic choices.
     // WASD movement MUST NOT inject menu commands (0x82..0x8e) in gameplay,
@@ -820,7 +825,11 @@ namespace rex::input::condemned2input {
       return 0;
     }
 
-    // Preserve pre-#23 native mouse analog overrides used for working punches.
+    if (REXCVAR_GET(condemned2_input_legacy_mnk) &&
+        btn != 0x0b && btn != 0x0c && btn != 0x16 && btn != 0x17 &&
+        btn != 0x7b && btn != 0x7c)
+      return 0; // Original guest controller: do not override punches / QTE.
+    // Mouse analog overrides are used only in native-only input mode.
     MouseBind mouseClick = g_condemned2_input_driver->MouseClick();
     if(mouseClick.isMouseMiddle && g_condemned2_input_driver->IsUsingMeleeWeapon()){ //Alt block
       if (btn == 0x79 || btn == 0x7a){
@@ -878,6 +887,8 @@ namespace rex::input::condemned2input {
   }
 
   double GetButtonOverrideValue(uint32_t btn){
+    if (REXCVAR_GET(condemned2_input_legacy_mnk))
+      return 0; // Guest XInput buttons only, as in working 0.2.1.
     // World interaction is a keyboard action, not a mouse-look action.
     // After calling the guest's Input_GetButton, supply 0x57 when E is held
     // irrespective of legacy_mnk or mouse-look mode. Original gamepad state
