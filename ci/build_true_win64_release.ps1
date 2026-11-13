@@ -31,8 +31,8 @@ function Exec([string]$Program, [string[]]$Arguments) {
     if ($LASTEXITCODE -ne 0) { throw "Tool exited with code $LASTEXITCODE : $Program" }
 }
 
-Write-Host '=== Source-level v0.2.1 input regression checks ==='
-Exec 'python' @((Join-Path $SourceRoot 'ci/test_input_021_contract.py'))
+Write-Host '=== Upstream psxrestore 2026-11-13 input regression checks ==='
+Exec 'python' @((Join-Path $SourceRoot 'ci/test_upstream_input_contract.py'))
 
 Write-Host '=== Private inputs integrity check ==='
 Assert-Hash $InputZip $expectedZip
@@ -139,12 +139,15 @@ Condemned 2 Recomp Windows x64 REAL SOURCE BUILD
 Public source: AD010/Condemned2Recomp
 Branch: fix/input-weapon-pickup-qte-060
 Commit: $revision
+Input source/header/mouse midhooks: exact upstream psxrestore/Condemned2Recomp 9df903a1510cfdd14bb42347f70078dc1e9ad27c (2026-11-13).
+Other modules and Windows CI packaging: AD010 build integration.
 Compiler: $clangVersion
 Generated from user-provided original XEX and Title Update XEXP.
 Packaged with public Condemned2Recomp 0.6.0 support files.
 Game input files are not included.
-This build is experimental. Keyboard interaction and doll factory QTE have
-not been proven fixed by a Windows CI compile alone.
+This is an experimental upstream post-v0.6.0 source build. The author fixed
+forensic tool mode and reports pickup prompts restored. Health packs, melee
+and doll factory finisher QTE remain UNVERIFIED without in-game testing.
 "@
 Set-Content -LiteralPath (Join-Path $stage 'TRUE_SOURCE_BUILD.txt') -Value $buildInfo -Encoding utf8
 $zipOut = Join-Path $OutputDir 'Condemned2Recomp-RealSource-InputFix-Windows-x64.zip'
