@@ -84,6 +84,7 @@ REX_EXTERN(__imp__IsMeleeWeapon); // Checks if player's current weapon is a mele
 //Imported functions used for PC controls!
 REX_IMPORT(Input_KeyDown, PressBind, uint32_t(uint32_t, uint32_t, uint32_t, uint32_t, uint32_t, uint32_t));
 REX_IMPORT(Input_KeyHold, HoldBind, uint32_t(uint32_t, uint32_t));
+REX_IMPORT(Input_IsCommandEnabled, IsCommandEnabled, uint32_t(uint32_t, uint32_t));
 
 namespace rex::input::condemned2input {
   namespace {
@@ -339,10 +340,14 @@ namespace rex::input::condemned2input {
       NativeKeyPress({0x47, 0x79, 0x1c});
     }
     if(mouse_clicks.isMouseRightPressed){
-      NativeKeyPress({
-        0x11, 0x7a, 0xbc, 
-        0x65 // Cancel investigation
-      });
+      // Keep the upstream right-hand strike intact. Action 0x65 is
+      // CancelTask, not an attack button: broadcasting it on every RMB
+      // press aborts forensic tasks (upstream input reverse-engineering,
+      // issue #35). Only send cancellation when the guest command set
+      // explicitly allows it. This must not interfere with 0x11/0x7a.
+      NativeKeyPress({0x11, 0x7a, 0xbc});
+      if ((IsCommandEnabled(GetInputManager(), 0x65) & 0xff) != 0)
+        NativeKeyPress({0x65});
     }
     //Mouse movement
     float dx = 0.0f, dy = 0.0f;
@@ -621,8 +626,11 @@ namespace rex::input::condemned2input {
     }
     else if (btn == 0x79 || btn == 0x47){ // Left click
       return mouseClick.isMouseLeft;
-    }else if (btn == 0x7a || btn == 0x65){ // Right click
+    }else if (btn == 0x7a){ // Right click / attack
       return mouseClick.isMouseRight;
+    }else if (btn == 0x65){ // CancelTask is NOT a second attack axis.
+      return (IsCommandEnabled(g_condemned2_input_driver->GetInputManager(), 0x65) & 0xff)
+             ? mouseClick.isMouseRight : 0.0;
     }
 
     // Radio/TV Antenna Tuning
@@ -689,7 +697,11 @@ namespace rex::input::condemned2input {
     if(g_condemned2_input_driver->IsUsingMeleeWeapon()){ //Alt block
       isMiddleClicked = mouseClick.isMouseMiddle;
     }
-    if (btn == 0x11 || btn == 0x65 || btn == 0x7a ) {
+    if (btn == 0x65) {
+      return (IsCommandEnabled(g_condemned2_input_driver->GetInputManager(), 0x65) & 0xff)
+             ? (mouseClick.isMouseRight || mouseClick.isMouseRightPressed) : 0.0;
+    }
+    if (btn == 0x11 || btn == 0x7a ) {
       return mouseClick.isMouseRight || mouseClick.isMouseRightPressed || isMiddleClicked;
     }else if(btn == 0x1c || btn == 0x47 || btn == 0x79){ 
       return mouseClick.isMouseLeft || mouseClick.isMouseLeftPressed || isMiddleClicked;
