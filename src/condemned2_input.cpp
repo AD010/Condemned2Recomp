@@ -622,12 +622,18 @@ namespace rex::input::condemned2input {
     }
   }
 
-  // Native key presses in Condemned 2!
+  // Native keyboard events must reproduce BOTH guest callbacks.
+  // Upstream 9df called Input_KeyDown even for release=true. In particular
+  // sprint, objectives and navigation would never receive their OFF event,
+  // which can keep a gameplay command set active across forensic contexts.
+  // This change does NOT affect ordinary press/attack aliases.
   void Condemned2InputDriver::NativeKeyPress(std::vector<int32_t> keycodes, bool release ){
     uint32_t keyManager = GetInputManager();
     for (int32_t k : keycodes) {
-      PressBind(keyManager, k, 0x0, 0x0, 0x0, 0x0);
-      if(!release){
+      if (release) {
+        ReleaseBind(keyManager, static_cast<uint32_t>(k));
+      } else {
+        PressBind(keyManager, k, 0x0, 0x0, 0x0, 0x0);
         HoldBind(keyManager, k);
       }
     }
