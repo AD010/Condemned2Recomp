@@ -387,26 +387,45 @@ namespace rex::input::condemned2input {
       grabChordGraceUntil_ = {};
     }
 
-    // Dispatch once per device update so hold/release transitions cannot latch.
-    FlushNativeKeys();
+    // No native key dispatch in strict 0.2.1 mode. The MNK device alone
+    // owns every guest button. Do not even poll native command availability
+    // here: that probe was never part of 0.2.1 and can query an inactive
+    // command set while loading a checkpoint.
+    const bool strictMnk = REXCVAR_GET(condemned2_input_legacy_mnk);
+    if (!strictMnk)
+      FlushNativeKeys();
+
     if (!isDialogOpen) {
-      // Only log transitions: do not flood a gameplay session with per-frame
-      // hook traces. This distinguishes input-state loss from missing UI art.
-      const uint32_t state =
-          (IsInMenu() ? 1u : 0u) |
-          (IsNativeCommandEnabled(0x57) ? 2u : 0u) |
-          (IsNativeCommandEnabled(0x40) ? 4u : 0u) |
-          (IsNativeCommandEnabled(0x70) ? 8u : 0u) |
-          (IsNativeBindDown("condemned2_input_use") ? 16u : 0u) |
-          (IsNativeBindDown("condemned2_input_forensics") ? 32u : 0u) |
-          ((mouse_clicks.isMouseLeft && mouse_clicks.isMouseRight) ? 64u : 0u);
-      if (!actionStateSnapshotInitialized_ || state != actionStateSnapshot_) {
-        REXLOG_INFO("[c2-input-state] hud={} use57={} grab40={} forensicReturn70={} keyUse={} keyTools={} dualTrigger={}",
-                    (state & 1u)!=0, (state & 2u)!=0, (state & 4u)!=0,
-                    (state & 8u)!=0, (state & 16u)!=0, (state & 32u)!=0,
-                    (state & 64u)!=0);
-        actionStateSnapshot_ = state;
-        actionStateSnapshotInitialized_ = true;
+      const bool e = IsNativeBindDown("condemned2_input_use");
+      const bool tools = IsNativeBindDown("condemned2_input_forensics");
+      const bool left = IsNativeBindDown("condemned2_input_primary_fire");
+      const bool right = IsNativeBindDown("condemned2_input_secondary_fire");
+      const uint32_t rawState = (e ? 1u : 0u) | (tools ? 2u : 0u) |
+                                (left ? 4u : 0u) | (right ? 8u : 0u);
+      if (strictMnk) {
+        if (!actionStateSnapshotInitialized_ || rawState != actionStateSnapshot_) {
+          REXLOG_INFO("[c2-mnk-raw] E={} R={} LMB={} RMB={} (strict 0.2.1, no direct actions)",
+                      e, tools, left, right);
+          actionStateSnapshot_ = rawState;
+          actionStateSnapshotInitialized_ = true;
+        }
+      } else {
+        // Native-only fallback keeps the original diagnostics and command set.
+        const uint32_t state =
+            (IsInMenu() ? 1u : 0u) |
+            (IsNativeCommandEnabled(0x57) ? 2u : 0u) |
+            (IsNativeCommandEnabled(0x40) ? 4u : 0u) |
+            (IsNativeCommandEnabled(0x70) ? 8u : 0u) |
+            (e ? 16u : 0u) | (tools ? 32u : 0u) |
+            ((mouse_clicks.isMouseLeft && mouse_clicks.isMouseRight) ? 64u : 0u);
+        if (!actionStateSnapshotInitialized_ || state != actionStateSnapshot_) {
+          REXLOG_INFO("[c2-input-state] hud={} use57={} grab40={} forensicReturn70={} keyUse={} keyTools={} dualTrigger={}",
+                      (state & 1u)!=0, (state & 2u)!=0, (state & 4u)!=0,
+                      (state & 8u)!=0, (state & 16u)!=0, (state & 32u)!=0,
+                      (state & 64u)!=0);
+          actionStateSnapshot_ = state;
+          actionStateSnapshotInitialized_ = true;
+        }
       }
     }
 
