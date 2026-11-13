@@ -21,6 +21,7 @@
 #include <rex/ui/window.h>
 
 #include <cstring>
+#include <atomic>
 #include <functional>
 #include <initializer_list>
 
@@ -868,9 +869,26 @@ namespace rex::input::condemned2input {
     uint32_t temp = ctx.r3.u32;
     uint32_t tempB = ctx.r4.u32;
     __imp__Input_GetButton(ctx, base);
+    const uint32_t originalGuestValue = ctx.r3.u32;
     double newValue = GetButtonOverrideValue(tempB);
     if(newValue != 0){
       ctx.r3.u64 = newValue;
+    }
+    // Only trace transitions of the two actions relevant to the reported
+    // soft-lock. This distinguishes physical input not reaching the game
+    // from the game suppressing the contextual pickup/grab prompt.
+    if (tempB == ActionID::PLAYER_USE || tempB == ActionID::PLAYER_GRAB) {
+      static std::atomic<int> lastUse{-1};
+      static std::atomic<int> lastGrab{-1};
+      auto& previous = tempB == ActionID::PLAYER_USE ? lastUse : lastGrab;
+      const int value = ctx.r3.u64 ? 1 : 0;
+      const int oldValue = previous.exchange(value, std::memory_order_relaxed);
+      if (oldValue != value) {
+        REXLOG_INFO("[c2-guest-action] action={:#x} original={} effective={} menu={} dialog={}",
+                    tempB, originalGuestValue, value,
+                    g_condemned2_input_driver->IsInMenu(),
+                    g_condemned2_input_driver->IsInputDialogOpen());
+      }
     }
     if(g_condemned2_input_driver->IsDebuggingFrames()){
       REXLOG_INFO("[condemned2_input][Input_GetButton] {:#x} {:#x} {:#x} {}", temp, tempB, ctx.lr, ctx.r3.u64);
@@ -901,7 +919,12 @@ namespace rex::input::condemned2input {
   // Checks if we're in a menu or not! This does not count in-game menus for investigations or fight club!
   REX_HOOK_RAW(Input_InHud){
     __imp__Input_InHud(ctx,base);
-    g_condemned2_input_driver->SetMenuMode(ctx.r3.u32);
+    const bool current = ctx.r3.u32 != 0;
+    static std::atomic<int> previous{-1};
+    const int old = previous.exchange(current ? 1 : 0, std::memory_order_relaxed);
+    if (old != static_cast<int>(current))
+      REXLOG_INFO("[c2-hud] Input_InHud changed {} -> {}", old, current);
+    g_condemned2_input_driver->SetMenuMode(current);
   }
   // Handles on attack landed events for player and NPCs.
   REX_HOOK_RAW(Input_OnAttackLanded){
