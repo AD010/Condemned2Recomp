@@ -19,9 +19,9 @@ def require(ok, message):
 
 require("auto& forensicBind = activeBinds[\"condemned2_input_forensics\"]" in input_cpp,
         "Upstream forensic button state is missing")
-require("forensicsElapsed > std::chrono::seconds(2)" in input_cpp,
+require("std::chrono::steady_clock::now() - forensicBind.pressTime > std::chrono::seconds(2)" in input_cpp,
         "Upstream two-second tool-wheel threshold is missing")
-require("Held({forensicBind}, {0x74} )" in input_cpp,
+require("Held({forensicBind}, {0x74})" in input_cpp,
         "Upstream forensic tool control 0x74 is missing")
 require("forensicsWheelCommandSent_" in input_cpp and
         "NativeKeyPress({0x71});" in input_cpp and
