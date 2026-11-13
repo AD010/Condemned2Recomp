@@ -63,8 +63,8 @@ require("grabChordActive_" in input_h and
 require("if (btn == 0x40 && g_condemned2_input_driver->IsUsingPCControls() &&" in input_cpp and
         "!g_condemned2_input_driver->IsInputDialogOpen()" in input_cpp and
         "bool IsInputDialogOpen() const { return isDialogOpen; }" in input_h and
-        'IsNativeBindDown("condemned2_input_primary_fire")' in input_cpp and
-        'IsNativeBindDown("condemned2_input_secondary_fire")' in input_cpp,
+        "const MouseBind buttons = g_condemned2_input_driver->MouseClick();" in input_cpp and
+        "return buttons.isMouseLeft && buttons.isMouseRight;" in input_cpp,
         "Guest Input_GetButton(0x40) must see both physical attack buttons")
 require('quickTool("condemned2_input_tool_uv"' in input_cpp and
         'quickTool("condemned2_input_tool_camera"' in input_cpp and
