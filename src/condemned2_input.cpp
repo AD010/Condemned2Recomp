@@ -301,7 +301,49 @@ namespace rex::input::condemned2input {
         ReleaseBind(GetInputManager(), 0x57);
         worldUseArmed_ = false;
       }
+      // A captured F4 window must terminate guest command holds too, not
+      // merely forget host Bind::prev flags. Otherwise the forensic wheel,
+      // navigation, and sprint may survive a menu/Alt+Tab transition.
+      auto releaseActive = [this](const char* name,
+                                  std::initializer_list<uint32_t> ids) -> bool {
+        auto it = activeBinds.find(name);
+        if (it == activeBinds.end() || !it->second.prev) return false;
+        for (uint32_t id : ids) ReleaseBind(GetInputManager(), id);
+        it->second.prev = false;
+        return true;
+      };
+      bool forensicWasActive =
+          releaseActive("condemned2_input_forensics", {0x74});
+      if (forensicsWheelCommandSent_) {
+        ReleaseBind(GetInputManager(), 0x71);
+        forensicWasActive = true;
+      }
       forensicsWheelCommandSent_ = false;
+      forensicWasActive |= releaseActive("condemned2_input_tool_uv",
+                                         {0x71, 0x90, 0x96, 0xa0});
+      forensicWasActive |= releaseActive("condemned2_input_tool_camera",
+                                         {0x71, 0x98, 0x9e, 0xa0});
+      forensicWasActive |= releaseActive("condemned2_input_tool_spectrometer",
+                                         {0x74, 0x71, 0x97, 0xa1});
+      forensicWasActive |= releaseActive("condemned2_input_tool_gps",
+                                         {0x74, 0x71, 0x99, 0x9f});
+      if (forensicWasActive) {
+        NativeKeyPress({0x70});
+        REXLOG_INFO("[c2-forensics] F4/dialog: release held tools and return 0x70");
+      }
+      releaseActive("condemned2_input_sprint", {0x10});
+      releaseActive("condemned2_input_objectives", {0x4f, 0x4e});
+      releaseActive("menu_nav_up", {0x82});
+      releaseActive("menu_nav_down", {0x83});
+      releaseActive("menu_nav_left", {0x84, 0x8d});
+      releaseActive("menu_nav_right", {0x85, 0x8e});
+      releaseActive("condemned2_input_move_forward", {0x82});
+      releaseActive("condemned2_input_move_backward", {0x83});
+      releaseActive("condemned2_input_move_left", {0x84, 0x8d});
+      releaseActive("condemned2_input_move_right", {0x85, 0x8e});
+      for (auto& [name, bind] : activeBinds) bind.prev = false;
+      mouse_clicks = {}; // no stale attacks while UI owns the mouse
+      wheelY = 0.0f;
       //Reset all movement when a dialog is active
       move_dx = 0;
       move_dy = 0;
