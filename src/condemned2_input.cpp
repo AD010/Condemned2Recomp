@@ -475,27 +475,33 @@ namespace rex::input::condemned2input {
       _hooks->SendCommandCmd({_hooks->AllocateHeapForString("msg Player (slowmo on default)"), 0, 0, 0});
     } 
 
-    // Forensic switch (upstream 9df903a follow-up).
-    // 0x74 (quick-use) and the 2s 0x71 (panel open) must have SEPARATE
-    // edge states. Held(0x74) sets forensicBind.prev on the first frame,
-    // so calling Held(0x71) with that same Bind after 2s can NEVER emit
-    // 0x71: Pressed() only emits when prev == false. This prevented the
-    // intended hold-to-open transition, potentially leaving tools active.
+    // Forensic tools: the press and the release must use different guest
+    // callbacks. Upstream Held() used Input_KeyDown even for an OFF event,
+    // and its 2s path tried to reuse the same consumed Bind::prev edge.
     auto& forensicBind = activeBinds["condemned2_input_forensics"];
     const bool wasForensicsHeld = forensicBind.prev;
-    Held({forensicBind}, {0x74});
     const bool forensicsNowHeld = IsDown(forensicBind);
+    if (forensicsNowHeld && !wasForensicsHeld) {
+      forensicBind.prev = true;
+      forensicBind.pressTime = std::chrono::steady_clock::now();
+      NativeKeyPress({0x74});  // Original R -> forensic-tools action.
+      REXLOG_INFO("[c2-forensics] R DOWN: tools 0x74");
+    }
     if (forensicsNowHeld && forensicBind.prev &&
         !forensicsWheelCommandSent_ &&
         std::chrono::steady_clock::now() - forensicBind.pressTime > std::chrono::seconds(2)) {
-      // Emit once per physical hold; do not overwrite 0x74's edge history.
-      NativeKeyPress({0x71});
+      NativeKeyPress({0x71});  // Actual hold-to-open event, once.
       forensicsWheelCommandSent_ = true;
       REXLOG_INFO("[c2-forensics] panel-open 0x71 after 2s R hold");
     }
     if (!forensicsNowHeld && wasForensicsHeld) {
+      forensicBind.prev = false;
+      ReleaseBind(GetInputManager(), 0x74);
+      if (forensicsWheelCommandSent_)
+        ReleaseBind(GetInputManager(), 0x71);
+      // Preserve the author's ForensicsReturn behavior on R release.
       NativeKeyPress({0x70});
-      REXLOG_INFO("[c2-forensics] R released: return 0x70, panel_was_open={}",
+      REXLOG_INFO("[c2-forensics] R released: true 0x74/0x71 UP; return 0x70, panel_was_open={}",
                   forensicsWheelCommandSent_);
       forensicsWheelCommandSent_ = false;
     }
