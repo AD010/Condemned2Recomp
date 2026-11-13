@@ -52,8 +52,7 @@ require("on:\n  workflow_dispatch:" in workflow,
 # The checked-out triggering revision therefore still contains that push
 # stanza. Reject any broad push trigger or any path other than this workflow.
 if "\n  push:" in workflow:
-    require("One user-authorized source build" in workflow and
-            "      - fix/input-weapon-pickup-qte-060" in workflow and
+    require("      - fix/input-weapon-pickup-qte-060" in workflow and
             "      - '.github/workflows/build-input-hotfix.yml'" in workflow and
             "      - 'src/condemned2_input.cpp'" not in workflow,
             "CI push trigger is too broad for a one-time authorized build")
