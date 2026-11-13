@@ -796,8 +796,12 @@ namespace rex::input::condemned2input {
     // poll it as an actual LT+RT chord, even if native camera is disabled.
     if (btn == 0x40 && g_condemned2_input_driver->IsUsingPCControls() &&
         !g_condemned2_input_driver->IsInputDialogOpen()) {
-      return g_condemned2_input_driver->IsNativeBindDown("condemned2_input_primary_fire") &&
-             g_condemned2_input_driver->IsNativeBindDown("condemned2_input_secondary_fire");
+      // Input_GetButton may execute on the guest's input thread. SDL's
+      // polling methods belong to the regular host input update, not here.
+      // Both MouseClick() fields already contain the mapped trigger pair;
+      // this works in both melee and firearm modes without re-polling SDL.
+      const MouseBind buttons = g_condemned2_input_driver->MouseClick();
+      return buttons.isMouseLeft && buttons.isMouseRight;
     }
     if (g_condemned2_input_driver->GetMouseLookType() == MouseLookType::DISABLED  // No changes if disabled.
     || !g_condemned2_input_driver->IsUsingPCControls() ) // Are using the gamepad?
