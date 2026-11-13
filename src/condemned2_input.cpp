@@ -414,7 +414,8 @@ namespace rex::input::condemned2input {
     if (grabChordDown && !grabChordActive_) {
       NativeKeyPress({0x40});
       grabChordActive_ = true;
-      REXLOG_INFO("[c2-grab] LT+RT overlap: guest CS_Grab(0x40) DOWN");
+      REXLOG_INFO("[c2-grab] LT+RT overlap: guest CS_Grab(0x40) DOWN, enabled_hint={}",
+                  (IsCommandEnabled(GetInputManager(), 0x40) & 0xff) != 0);
     } else if (!grabChordDown && grabChordActive_) {
       ReleaseBind(GetInputManager(), 0x40);
       grabChordActive_ = false;
@@ -793,7 +794,8 @@ namespace rex::input::condemned2input {
   double GetButtonOverrideValue(uint32_t btn){
     // Grab is a controller action, not a mouse-look axis. Let the guest
     // poll it as an actual LT+RT chord, even if native camera is disabled.
-    if (btn == 0x40 && g_condemned2_input_driver->IsUsingPCControls()) {
+    if (btn == 0x40 && g_condemned2_input_driver->IsUsingPCControls() &&
+        !g_condemned2_input_driver->IsInputDialogOpen()) {
       return g_condemned2_input_driver->IsNativeBindDown("condemned2_input_primary_fire") &&
              g_condemned2_input_driver->IsNativeBindDown("condemned2_input_secondary_fire");
     }
