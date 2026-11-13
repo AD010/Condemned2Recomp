@@ -453,17 +453,29 @@ namespace rex::input::condemned2input {
       _hooks->SendCommandCmd({_hooks->AllocateHeapForString("msg Player (slowmo on default)"), 0, 0, 0});
     } 
 
-    //Forensic switch
-    //Depending on how long this button is held, it could either open the forensics tools menu or quick-use your current forensic tool.
+    // Forensic switch (upstream 9df903a follow-up).
+    // 0x74 (quick-use) and the 2s 0x71 (panel open) must have SEPARATE
+    // edge states. Held(0x74) sets forensicBind.prev on the first frame,
+    // so calling Held(0x71) with that same Bind after 2s can NEVER emit
+    // 0x71: Pressed() only emits when prev == false. This prevented the
+    // intended hold-to-open transition, potentially leaving tools active.
     auto& forensicBind = activeBinds["condemned2_input_forensics"];
-    bool forensicsPressed = forensicBind.prev;
-    Held({forensicBind}, {0x74} );
-    bool isForensicsOpen = IsDown(forensicBind);
-    auto forensicsElapsed = std::chrono::steady_clock::now() - forensicBind.pressTime;
-    if(isForensicsOpen && forensicsElapsed > std::chrono::seconds(2) ){
-      Held({forensicBind}, {0x71} );
-    }else if(!isForensicsOpen && forensicsPressed){
+    const bool wasForensicsHeld = forensicBind.prev;
+    Held({forensicBind}, {0x74});
+    const bool forensicsNowHeld = IsDown(forensicBind);
+    if (forensicsNowHeld && forensicBind.prev &&
+        !forensicsWheelCommandSent_ &&
+        std::chrono::steady_clock::now() - forensicBind.pressTime > std::chrono::seconds(2)) {
+      // Emit once per physical hold; do not overwrite 0x74's edge history.
+      NativeKeyPress({0x71});
+      forensicsWheelCommandSent_ = true;
+      REXLOG_INFO("[c2-forensics] panel-open 0x71 after 2s R hold");
+    }
+    if (!forensicsNowHeld && wasForensicsHeld) {
       NativeKeyPress({0x70});
+      REXLOG_INFO("[c2-forensics] R released: return 0x70, panel_was_open={}",
+                  forensicsWheelCommandSent_);
+      forensicsWheelCommandSent_ = false;
     }
 
     //Forensic tools
