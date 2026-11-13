@@ -508,11 +508,37 @@ namespace rex::input::condemned2input {
       NativeKeyPress({0x8b});
     }
 
-    // Quick-swap (Custom controls)
-    Held({activeBinds["condemned2_input_tool_uv"]}, {0x71,0x90,0x96,0xa0} );
-    Held({activeBinds["condemned2_input_tool_camera"]}, {0x71,0x98,0x9e,0xa0} );
-    Held({activeBinds["condemned2_input_tool_spectrometer"]}, {0x74,0x71,0x97,0xa1} );
-    Held({activeBinds["condemned2_input_tool_gps"]}, {0x74,0x71,0x99,0x9f} );
+    // Quick tool selection is a complete wheel OPEN / SELECT / RETURN
+    // transaction, not a permanently held set of game commands.
+    // The upstream Held(...) implementation sends Input_KeyDown even in
+    // its release branch and never sends ForensicsReturn(0x70). That can
+    // leave the game's active command set in forensic mode, suppressing
+    // subsequent weapon pickup prompts and contextual finishing moves.
+    // Preserve the exact upstream commands on DOWN; send real guest KeyUp
+    // for those aliases, then finish the wheel on physical release.
+    auto quickTool = [this](const char* bindName,
+                            std::initializer_list<int32_t> ids,
+                            const char* toolLabel) {
+      Bind& bind = activeBinds[bindName];
+      const bool nowDown = IsDown(bind);
+      if (nowDown && !bind.prev) {
+        bind.prev = true;
+        bind.pressTime = std::chrono::steady_clock::now();
+        NativeKeyPress(std::vector<int32_t>(ids));
+        REXLOG_INFO("[c2-quicktool] {}: selection DOWN", toolLabel);
+      } else if (!nowDown && bind.prev) {
+        bind.prev = false;
+        for (int32_t id : ids) {
+          ReleaseBind(GetInputManager(), static_cast<uint32_t>(id));
+        }
+        NativeKeyPress({0x70});
+        REXLOG_INFO("[c2-quicktool] {}: selection UP; wheel return 0x70", toolLabel);
+      }
+    };
+    quickTool("condemned2_input_tool_uv", {0x71,0x90,0x96,0xa0}, "UV");
+    quickTool("condemned2_input_tool_camera", {0x71,0x98,0x9e,0xa0}, "Camera");
+    quickTool("condemned2_input_tool_spectrometer", {0x74,0x71,0x97,0xa1}, "Spectrometer");
+    quickTool("condemned2_input_tool_gps", {0x74,0x71,0x99,0x9f}, "GPS");
     g_condemned2_input_driver->SetMouseWheelY(0); //Reset wheel after a frame.
   }
   
