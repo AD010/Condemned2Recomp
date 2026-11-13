@@ -21,8 +21,9 @@ require("auto& forensicBind = activeBinds[\"condemned2_input_forensics\"]" in in
         "Upstream forensic button state is missing")
 require("std::chrono::steady_clock::now() - forensicBind.pressTime > std::chrono::seconds(2)" in input_cpp,
         "Upstream two-second tool-wheel threshold is missing")
-require("Held({forensicBind}, {0x74})" in input_cpp,
-        "Upstream forensic tool control 0x74 is missing")
+require("NativeKeyPress({0x74});" in input_cpp and
+        "ReleaseBind(GetInputManager(), 0x74);" in input_cpp,
+        "Forensic R action 0x74 must have a genuine DOWN/UP pair")
 require("forensicsWheelCommandSent_" in input_cpp and
         "NativeKeyPress({0x71});" in input_cpp and
         "forensicsNowHeld && forensicBind.prev" in input_cpp,
@@ -55,6 +56,13 @@ require("if (btn == 0x40 && g_condemned2_input_driver->IsUsingPCControls())" in 
         'IsNativeBindDown("condemned2_input_primary_fire")' in input_cpp and
         'IsNativeBindDown("condemned2_input_secondary_fire")' in input_cpp,
         "Guest Input_GetButton(0x40) must see both physical attack buttons")
+require('quickTool("condemned2_input_tool_uv"' in input_cpp and
+        'quickTool("condemned2_input_tool_camera"' in input_cpp and
+        'quickTool("condemned2_input_tool_spectrometer"' in input_cpp and
+        'quickTool("condemned2_input_tool_gps"' in input_cpp and
+        "ReleaseBind(GetInputManager(), static_cast<uint32_t>(id));" in input_cpp and
+        "[c2-quicktool]" in input_cpp,
+        "Quick forensic tool 1-4 must release native aliases and close the panel")
 require("[c2-forensics] panel-open 0x71" in input_cpp and
         "[c2-grab] LT+RT overlap:" in input_cpp and
         "[c2-world-use] E_pressed" in input_cpp,
