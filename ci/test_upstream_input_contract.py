@@ -1,7 +1,7 @@
 """Validate authoritative upstream input integration before Windows recompilation.
 
 This manual-CI guard checks psxrestore/Condemned2Recomp's 2026-11-13
-9df903a source-level forensic-tool fix and the 2026-11-12 mouse fixes,
+9df903a source-level forensic-tool fix plus local 0x65 safety gate, and the 2026-11-12 mouse fixes,
 plus the locally retained checkpoint prompt guard. This is NOT a game test.
 """
 from pathlib import Path
@@ -35,6 +35,12 @@ require('Held({useBind}, {0x57} )' in input_cpp,
 require('NativeKeyPress({0x47, 0x79, 0x1c})' in input_cpp and
         '0x11, 0x7a, 0xbc' in input_cpp,
         "Original mouse attack commands were changed")
+# Local safety patch on top of upstream 9df903a: RMB must not send
+# CancelTask(0x65) while an unrelated gameplay command set is active.
+# The two attack actions remain unconditional; only the cancel action is gated.
+require("REX_IMPORT(Input_IsCommandEnabled, IsCommandEnabled" in input_cpp and
+        "if ((IsCommandEnabled(GetInputManager(), 0x65) & 0xff) != 0)" in input_cpp,
+        "RMB CancelTask 0x65 must be gated on the active forensic command set")
 require("MnkInputDriver" not in input_cpp,
         "Do not overlay the experimental 0.2.1 MNK keyboard driver on the newly-fixed upstream native input")
 require("void Mouse_SensitivityCurveNative(PPCRegister&" in input_cpp and
