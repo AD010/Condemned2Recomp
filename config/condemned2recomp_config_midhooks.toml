@@ -32,6 +32,13 @@ registers = ["f0", "f29"]
 after_instruction = false
 jump_address_on_true = 0x8230A52C
 
+# Native Mouse Look sensitivity
+[[midasm_hook]]
+address = 0x82306EE4
+name = "Mouse_SensitivityCurveNative"
+registers = ["f31"]
+after_instruction = true
+
 ############################
 #Video Resolution Mid Hooks#
 ############################
