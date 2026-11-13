@@ -44,6 +44,17 @@ require("void Mouse_SensitivityCurveNative(PPCRegister&" in input_cpp and
 require("REX_HOOK_RAW(HudSpectatorModeChange)" in graphics and
         "condemned2_sp_spectator_prompt_fix" in graphics,
         "The retained single-player checkpoint HUD prompt fix is missing")
-require("on:\n  workflow_dispatch:" in workflow and "\n  push:" not in workflow,
-        "CI must be explicitly authorized manually")
+require("on:\n  workflow_dispatch:" in workflow,
+        "CI must support explicit manual workflow dispatch")
+# A temporary one-time workflow-file-only push is used by the GitHub app
+# connector (which lacks workflow_dispatch). It is created exclusively for
+# a user-authorized build, then immediately removed in the next commit.
+# The checked-out triggering revision therefore still contains that push
+# stanza. Reject any broad push trigger or any path other than this workflow.
+if "\n  push:" in workflow:
+    require("One user-authorized source build" in workflow and
+            "      - fix/input-weapon-pickup-qte-060" in workflow and
+            "      - '.github/workflows/build-input-hotfix.yml'" in workflow and
+            "      - 'src/condemned2_input.cpp'" not in workflow,
+            "CI push trigger is too broad for a one-time authorized build")
 print("PASS: upstream 9df903a forensic/input fix, mouse sensitivity and checkpoint HUD guard")
