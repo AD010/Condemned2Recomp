@@ -17,8 +17,8 @@
 0x824262C8 = {name="Player_UserSettings"}
 0x823C76A8 = {name="Player_ApplySettings"} 
 0x82221E40 = {name="ParseSWF"}
+0x824149D8 = {name="HudSpectatorModeChange"} # Retain SP HUD pickup prompt hook
 0x826F9858 = {name="GetLanguage"}
-0x824149D8 = {name="HudSpectatorModeChange"} # CActionScriptPlayer spectator HUD event, issue #38, PR #36
 
 #UI
 #0x822F3330 = {name="UI_PlaySound"}
@@ -49,14 +49,14 @@
 0x8234C130 = {name="Input_KeyDown"}
 0x8234BEC0 = {name="Input_KeyUp"}
 0x8234BF28 = {name="Input_KeyHold"}
-0x8234C388 = {name="Input_IsCommandEnabled"} # Active guest command set; not every alias is valid in each mode
+0x8234C388 = {name="Input_IsCommandEnabled"} # Gate CancelTask on actual guest action context
 0x8232CDD8 = {name="Input_PlayerConnected"}
 0x82315438 = {name="Input_PlayerInput"}
 0x82874E28 = {name="Input_OnAttackLanded"}
 0x822D3038 = {name="Input_InHud"}
 0x82425158 = {name="AimingSensitivity"} # Aiming sensitivity setting
 0x8230A428 = {name="ProcessLookInput"}
-0x82306DE8 = {name="Camera_MouseLook"} # Restored native mouse look!
+0x82306DD8 = {name="Camera_MouseLook"} # Restored native mouse look!
 
 #Unlockables and Cheats
 0x823077E0 = {name="Unlockables_Levels"}
