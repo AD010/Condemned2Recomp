@@ -290,6 +290,18 @@ namespace rex::input::condemned2input {
     if(!isDialogOpen){
       PCControls();
     }else{
+      // When a settings dialog captures the mouse, release any pending
+      // world actions. Otherwise a held R / E / LT+RT may survive focus
+      // loss and keep the guest action set stuck.
+      if (grabChordActive_) {
+        ReleaseBind(GetInputManager(), 0x40);
+        grabChordActive_ = false;
+      }
+      if (worldUseArmed_) {
+        ReleaseBind(GetInputManager(), 0x57);
+        worldUseArmed_ = false;
+      }
+      forensicsWheelCommandSent_ = false;
       //Reset all movement when a dialog is active
       move_dx = 0;
       move_dy = 0;
@@ -349,6 +361,22 @@ namespace rex::input::condemned2input {
       NativeKeyPress({0x11, 0x7a, 0xbc});
       if ((IsCommandEnabled(GetInputManager(), 0x65) & 0xff) != 0)
         NativeKeyPress({0x65});
+    }
+    // The game's CS_Grab / CS_DoubleGrab command is 0x40, separate
+    // from both single-hand strikes (0x11/0x1c). The upstream native
+    // driver never emitted it, although the 0.2.1 XInput path could
+    // represent both triggers held at once. Fire a real guest grab only
+    // when BOTH physical attack buttons overlap; ordinary single-button
+    // melee remains completely unchanged.
+    const bool grabChordDown = isMouseLeft && isMouseRight;
+    if (grabChordDown && !grabChordActive_) {
+      NativeKeyPress({0x40});
+      grabChordActive_ = true;
+      REXLOG_INFO("[c2-grab] LT+RT overlap: guest CS_Grab(0x40) DOWN");
+    } else if (!grabChordDown && grabChordActive_) {
+      ReleaseBind(GetInputManager(), 0x40);
+      grabChordActive_ = false;
+      REXLOG_INFO("[c2-grab] LT+RT overlap ended: guest CS_Grab(0x40) UP");
     }
     //Mouse movement
     float dx = 0.0f, dy = 0.0f;
@@ -677,6 +705,13 @@ namespace rex::input::condemned2input {
   }
 
   double GetButtonOverrideValue(uint32_t btn){
+    // Grab is a controller action, not a mouse-look axis. Let the guest
+    // poll it as an actual LT+RT chord, even if native camera is disabled.
+    if (btn == 0x40 && g_condemned2_input_driver->IsUsingPCControls()) {
+      auto binds = g_condemned2_input_driver->GetActiveBinds();
+      return g_condemned2_input_driver->IsDown(binds["condemned2_input_primary_fire"]) &&
+             g_condemned2_input_driver->IsDown(binds["condemned2_input_secondary_fire"]);
+    }
     if (g_condemned2_input_driver->GetMouseLookType() == MouseLookType::DISABLED  // No changes if disabled.
     || !g_condemned2_input_driver->IsUsingPCControls() ) // Are using the gamepad?
       return 0;
