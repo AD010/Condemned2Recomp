@@ -8,14 +8,11 @@
 #include <rex/ui/window_listener.h>
 
 #include <cstdint>
-#include <atomic>
-#include <chrono>
 #include <mutex>
 #include <queue>
 #include <string>
 #include <functional>
 #include <initializer_list>
-#include <vector>
 
 #include <imgui.h>
 #include <imgui_internal.h>
@@ -35,6 +32,7 @@ namespace rex::input::condemned2input{
       SDL_Scancode keys[kMaxKeys] = {};
       uint32_t mouseMask = 0;
       bool prev = false;
+      std::chrono::steady_clock::time_point pressTime{};
    };
 
    struct MouseBind {
@@ -61,11 +59,7 @@ namespace rex::input::condemned2input{
          X_RESULT GetDeviceKeystroke(DeviceId id, uint32_t flags, X_INPUT_KEYSTROKE* out_keystroke) override;
          void OnWindowAvailable(rex::ui::Window* window) override;
          void PCControls();
-         void UpdateNativeMouseLook();
          uint32_t GetInputManager();
-         void ObserveInputManager(uint32_t candidate, uint32_t action);
-         bool IsNativeCommandEnabled(uint32_t action);
-         bool IsNativeBindDown(const char* bindName);
 
          bool IsAnyDialogOpen();
          std::unordered_map<std::string, ImGuiWindow*> GetActiveWindows() { return activeWindows; }
@@ -73,9 +67,8 @@ namespace rex::input::condemned2input{
          Bind ParseBind(const std::string& s);
          bool IsDown(const Bind &b);
          bool Pressed(Bind& b);
-         void Held(std::initializer_list<std::reference_wrapper<Bind>> binds, std::vector<int32_t> keycodes, bool pressed = false);
-         void NativeKeyPress(std::vector<int32_t> keycodes);
-         void FlushNativeKeys();
+         void Held( std::initializer_list<std::reference_wrapper<Bind>> binds, std::vector<int32_t> keycodes, bool down = false, bool pressed = false);
+         void NativeKeyPress(std::vector<int32_t> keycodes, bool release = false);
          std::unordered_map<std::string, Bind> GetActiveBinds() { return activeBinds; }
 
          static bool WatchEventCallback(void* userdata, SDL_Event* event);
@@ -86,9 +79,12 @@ namespace rex::input::condemned2input{
          std::pair<double, double> AccumMouse() { return {last_add_dx, last_add_dy}; }
          std::pair<double, double> MoveVel() { return {move_dx, move_dy}; }
          MouseBind MouseClick() { return mouse_clicks; }
-         double GetAxisOverrideValue(uint32_t btn);
+         double GetAxisOverrideValue(uint32_t btn, float currentValue);
          double GetButtonOverrideValue(uint32_t btn);
          void SetMouseWheelY(float newY, bool add = false) { if(add) { wheelY += newY; } else { wheelY = newY; } }
+
+         double GetMouseSensitivity() { return mouseSensitivity; }
+         void SetMouseSensitivity(double newSensitivity) { mouseSensitivity = newSensitivity; }
 
          void SetTuningControls( bool enabled ) { isTuning = enabled; }
          void SetMeleeControls( bool enabled ) { hasMeleeWeapon = enabled; }
@@ -122,32 +118,25 @@ namespace rex::input::condemned2input{
          MouseLookType mouseLookType;
          bool isDialogOpen = true;
          bool isInMenu = false;
-         bool isTuning = false; //Hey, wanna listen to some tunes?
-         bool pendingForensicsReturn_ = false;
-         bool forensicWheelWasDown_ = false;
-         bool actionStateSnapshotInitialized_ = false;
-         uint32_t actionStateSnapshot_ = 0;
+         bool isTuning; //Hey, wanna listen to some tunes?
          bool isUsingPCControls = true;
          bool isDebugging = false;
          bool isDebuggingFrames = false;
-         double last_dx = 0;
-         double last_dy = 0;
-         double last_add_dx = 0;
-         double last_add_dy = 0;
-         float wheelY = 0;
+         double mouseSensitivity;
+         double last_dx;
+         double last_dy;
+         double last_add_dx;
+         double last_add_dy;
+         float wheelY;
 
          //Custom input
          bool isUsingCRT = false;
-         std::atomic<uint32_t> observedInputManager_{0};
-         std::chrono::steady_clock::time_point grabChordGraceUntil_{};
          bool blockFirstFrame = false;
          bool hasMeleeWeapon = false;
-         double move_dx = 0;
-         double move_dy = 0;
+         double move_dx;
+         double move_dy;
          MouseBind mouse_clicks;
          std::unordered_map<std::string, Bind> activeBinds;
-         std::vector<int32_t> activeNativeKeys;
-         std::vector<int32_t> requestedNativeKeys;
          const std::vector<std::string> pcBinds = {
             "condemned2_input_move_forward",
             "condemned2_input_move_backward",
