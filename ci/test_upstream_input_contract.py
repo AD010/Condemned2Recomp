@@ -45,6 +45,21 @@ require('NativeKeyPress({0x47, 0x79, 0x1c})' in input_cpp and
 require("REX_IMPORT(Input_IsCommandEnabled, IsCommandEnabled" in input_cpp and
         "if ((IsCommandEnabled(GetInputManager(), 0x65) & 0xff) != 0)" in input_cpp,
         "RMB CancelTask 0x65 must be gated on the active forensic command set")
+# Native keyboard/mouse has no XInput combination device: both real attack
+# buttons must generate the 0x40 CS_Grab action, independently of normal melee.
+require("grabChordActive_" in input_h and
+        "NativeKeyPress({0x40});" in input_cpp and
+        "ReleaseBind(GetInputManager(), 0x40);" in input_cpp,
+        "LT+RT grab must have distinct DOWN/UP edges (0x40)")
+require("if (btn == 0x40 && g_condemned2_input_driver->IsUsingPCControls())" in input_cpp and
+        'IsNativeBindDown("condemned2_input_primary_fire")' in input_cpp and
+        'IsNativeBindDown("condemned2_input_secondary_fire")' in input_cpp,
+        "Guest Input_GetButton(0x40) must see both physical attack buttons")
+require("[c2-forensics] panel-open 0x71" in input_cpp and
+        "[c2-grab] LT+RT overlap:" in input_cpp and
+        "[c2-world-use] E_pressed" in input_cpp,
+        "Input transition diagnostics are missing")
+
 require("MnkInputDriver" not in input_cpp,
         "Do not overlay the experimental 0.2.1 MNK keyboard driver on the newly-fixed upstream native input")
 require("void Mouse_SensitivityCurveNative(PPCRegister&" in input_cpp and
@@ -66,4 +81,4 @@ if "\n  push:" in workflow:
             "      - '.github/workflows/build-input-hotfix.yml'" in workflow and
             "      - 'src/condemned2_input.cpp'" not in workflow,
             "CI push trigger is too broad for a one-time authorized build")
-print("PASS: upstream 9df903a forensic/input fix, mouse sensitivity and checkpoint HUD guard")
+print("PASS: native forensic 0x71 edge, guest E KeyUp, grab 0x40, CancelTask gate, author input, HUD guard")
