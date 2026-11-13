@@ -70,6 +70,11 @@ namespace rex::input::condemned2input{
          void Held( std::initializer_list<std::reference_wrapper<Bind>> binds, std::vector<int32_t> keycodes, bool down = false, bool pressed = false);
          void NativeKeyPress(std::vector<int32_t> keycodes, bool release = false);
          std::unordered_map<std::string, Bind> GetActiveBinds() { return activeBinds; }
+         // Query live bindings without copying the entire map each frame.
+         bool IsNativeBindDown(const char* name) {
+            auto it = activeBinds.find(name);
+            return it != activeBinds.end() && IsDown(it->second);
+         }
 
          static bool WatchEventCallback(void* userdata, SDL_Event* event);
          void SetMouseLookType( MouseLookType mouseMode ) { mouseLookType = mouseMode; }
