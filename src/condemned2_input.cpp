@@ -19,10 +19,8 @@
 #include <rex/ui/window.h>
 
 #include <cstring>
-#include <cstdint>
 #include <functional>
 #include <initializer_list>
-#include <algorithm>
 
 #include <imgui.h>
 #include <imgui_internal.h>
@@ -64,22 +62,12 @@ REXCVAR_DEFINE_STRING(condemned2_input_objectives, "Tab", "Condemned 2/Input/Key
 
 // Mouse Settings
 REXCVAR_DEFINE_STRING(condemned2_input_mouse, "Mixed","Condemned 2/Input/Mouse", "Mouse Look Mode").allowed({"Native", "Mixed", "Disable"});
-REXCVAR_DEFINE_DOUBLE(condemned2_input_mouse_sensitivity, 0.075, "Condemned 2/Input/Mouse", "Mouse Sensitivity").range(0.01, 1.0);
+REXCVAR_DEFINE_DOUBLE(condemned2_input_mouse_sensitivity, 1.0, "Condemned 2/Input/Mouse", "Mouse Sensitivity").range(0.0, 2.0);
+REXCVAR_DEFINE_DOUBLE(condemned2_input_ads_sensitivity, 0.5, "Condemned 2/Input/Mouse", "ADS Sensitivity").range(0.0, 2.0);
+REXCVAR_DEFINE_DOUBLE(condemned2_input_tuning_sensitivity, 0.1, "Condemned 2/Input/Mouse", "Tuning Sensitivity").range(0.0, 1.0);
 
 REXCVAR_DEFINE_BOOL(condemned2_input_debug, false, "Condemned 2/Debug", "Toggle logging for all input.");
 REXCVAR_DEFINE_BOOL(condemned2_input_frame_debug, false, "Condemned 2/Debug", "Toggle logging for input per frame.");
-// Log only player interaction transitions; this distinguishes injected input
-// from gameplay command dispatch and avoids huge per-frame trace files.
-REXCVAR_DEFINE_BOOL(condemned2_input_trace_use_grab, false, "Condemned 2/Debug", "Log use/grab guest input dispatch for missing pickup prompt investigation.");
-// 0.2.1 had the standard MnkInputDriver alongside the native mouse hooks.
-// Since 0.3.x, the game is missing pickup/grab prompts with keyboard/mouse,
-// but real controller paths still work. Restore the SDK's actual keyboard
-// device, not the one-off raw XInput A bridge that broke health kits.
-REXCVAR_DEFINE_BOOL(condemned2_input_legacy_mnk, true, "Condemned 2/Input/Keyboard", "Restore the 0.2.1 keyboard gamepad input device for world pickup and scripted finishers. Native mouse camera stays enabled.")
-    .lifecycle(rex::cvar::Lifecycle::kRequiresRestart);
-// Native action commands handle keyboard/mouse interaction directly.
-// Do not inject synthetic gamepad A/LT/RT: the regression in log 030 showed
-// that this removed working health-pack pickup without restoring grabs.
 
 //Native functions for inputs
 REX_EXTERN(__imp__Input_KeyDown);
@@ -94,13 +82,16 @@ REX_EXTERN(__imp__TvAntennaAdjust); // Function that processes Radio/TV antenna 
 REX_EXTERN(__imp__IsMeleeWeapon); // Checks if player's current weapon is a melee weapon
 
 //Imported functions used for PC controls!
-REX_IMPORT(Input_KeyDown, PressBind, uint32_t(uint32_t, uint32_t));
+REX_IMPORT(Input_KeyDown, PressBind, uint32_t(uint32_t, uint32_t, uint32_t, uint32_t, uint32_t, uint32_t));
 REX_IMPORT(Input_KeyHold, HoldBind, uint32_t(uint32_t, uint32_t));
-REX_IMPORT(Input_KeyUp, ReleaseBind, uint32_t(uint32_t, uint32_t));
-REX_IMPORT(Input_IsCommandEnabled, IsCommandEnabled, uint32_t(uint32_t, uint32_t));
 
 namespace rex::input::condemned2input {
-  namespace {constexpr rex::input::DeviceId kDevice = static_cast<rex::input::DeviceId>(0x4E4F5000); constexpr uint32_t kInputManager = 0x4005ae70; constexpr uint32_t kInputManagerCRT = 0x200afcc0;}
+  namespace {
+    constexpr rex::input::DeviceId kDevice = static_cast<rex::input::DeviceId>(0x4E4F5000); 
+    constexpr uint32_t kInputManager = 0x4005ae70;
+    constexpr uint32_t kInputManagerCRT = 0x200afcc0;     
+    constexpr float PI = 3.14159265358979323846f;
+  }
   Condemned2InputDriver* g_condemned2_input_driver = nullptr;
 
   Condemned2InputDriver::Condemned2InputDriver(rex::ui::Window* window, size_t window_z_order) : InputDriver(window, window_z_order) {
@@ -239,69 +230,6 @@ namespace rex::input::condemned2input {
       REXLOG_INFO("[condemned2_input] SDL Input Driver Initialized");
     }
 
-    // Restore the exact SDK MnkInputDriver class used by v0.2.1, while
-    // preserving the native v0.6 mouse camera and forensic input driver.
-    // Avoid all other default Mnk keybinds, which conflict with E, Space,
-    // R, WASD, the forensic number keys and arrow-key evidence navigation.
-    // The SDK merges synthetic devices into player 0 via SlotAssignment.
-    if (REXCVAR_GET(condemned2_input_legacy_mnk)) {
-      auto setGuestBind = [](const char* name, const char* value) {
-        if (!rex::cvar::SetFlagByName(name, value)) {
-          REXLOG_ERROR("[c2-legacy-mnk] unable to set SDK bind {}", name);
-        }
-      };
-      setGuestBind("mnk_mode", "true");
-      setGuestBind("mnk_mouse", "false");
-      const char* unusedPadBinds[] = {
-        "keybind_b", "keybind_x", "keybind_y",
-        "keybind_left_shoulder", "keybind_right_shoulder",
-        "keybind_lstick_up", "keybind_lstick_down",
-        "keybind_lstick_left", "keybind_lstick_right",
-        "keybind_lstick_press", "keybind_rstick_up",
-        "keybind_rstick_down", "keybind_rstick_left",
-        "keybind_rstick_right", "keybind_rstick_press",
-        "keybind_dpad_up", "keybind_dpad_down",
-        "keybind_dpad_left", "keybind_dpad_right",
-        "keybind_back", "keybind_start", "keybind_guide"
-      };
-      for (const char* key : unusedPadBinds) setGuestBind(key, "");
-      // Reproduce the working user-provided 0.2.1 log 001 controller map.
-      // The custom driver must NOT separately inject actions in this mode.
-      setGuestBind("keybind_lstick_up", "W");
-      setGuestBind("keybind_lstick_down", "S");
-      setGuestBind("keybind_lstick_left", "A");
-      setGuestBind("keybind_lstick_right", "D");
-      setGuestBind("keybind_left_shoulder", "Shift+W");
-      setGuestBind("keybind_right_shoulder", "G");
-      setGuestBind("keybind_rstick_press", "Space");
-      setGuestBind("keybind_start", "Esc,Return");
-      setGuestBind("keybind_back", "Tab,Backspace");
-      setGuestBind("keybind_dpad_up", "Up,1");
-      setGuestBind("keybind_dpad_down", "Down,2");
-      setGuestBind("keybind_dpad_left", "Left,3");
-      setGuestBind("keybind_dpad_right", "Right,4");
-      setGuestBind("keybind_b", "F");
-      setGuestBind("keybind_y", "H");
-      setGuestBind("keybind_a", "E");
-      // X is the controller's supported forensic-tools command. The 0.6
-      // custom driver directly injected 0x74 and 0x71 together, with extra
-      // tool commands from 1..4, leaving the guest's tool/interaction state
-      // out of sync after changing GPS/camera (upstream issues #66/#71).
-      setGuestBind("keybind_x", "R");
-      setGuestBind("keybind_left_trigger", "LMB");
-      setGuestBind("keybind_right_trigger", "RMB");
-
-      auto mnkDriver = std::make_unique<mnk::MnkInputDriver>(nullptr, 0);
-      if (mnkDriver->Setup() == X_STATUS_SUCCESS) {
-        input->AddDriver(std::move(mnkDriver));
-        // Preserve the exact startup marker from the successful 0.2.1 logs.
-        REXLOG_INFO("[condemned2_input] MNK Input Driver Initialized");
-        REXLOG_INFO("[c2-legacy-mnk] strict 0.2.1 input: MNK owns pad/WASD/A/X/LT/RT; custom driver supplies native mouse camera only");
-      } else {
-        REXLOG_ERROR("[c2-legacy-mnk] SDK keyboard driver setup failed");
-      }
-    }
-
     //Condemned 2 Custom Input Driver
     auto cndmned2_driver = std::make_unique<rex::input::condemned2input::Condemned2InputDriver>(nullptr, 0); 
     if (cndmned2_driver->Setup() == X_STATUS_SUCCESS) {
@@ -339,11 +267,6 @@ namespace rex::input::condemned2input {
       return X_ERROR_DEVICE_NOT_CONNECTED;
     }
 
-    // The host input system merges real and synthetic controllers; never
-    // return an uninitialized X_INPUT_STATE (including the first frame).
-    if (out_state) {
-      std::memset(out_state, 0, sizeof(*out_state));
-    }
     //Wait one frame for native input system to initialize
     if(!blockFirstFrame){
       blockFirstFrame = true;
@@ -361,18 +284,9 @@ namespace rex::input::condemned2input {
       }
     }
 
-    // Strict 0.2.1 input architecture: the Mnk device alone owns the guest
-    // controller, while this driver only supplies native camera mouse deltas.
-    // Calling PCControls() in this mode injected gameplay actions a second
-    // time and let the forensic wheel overwrite the active command context.
+    //PC Controls aren't active with any dialog is open.
     if(!isDialogOpen){
-      if (REXCVAR_GET(condemned2_input_legacy_mnk)) {
-        UpdateNativeMouseLook();
-        move_dx = move_dy = 0;
-        mouse_clicks = {};
-      } else {
-        PCControls();
-      }
+      PCControls();
     }else{
       //Reset all movement when a dialog is active
       move_dx = 0;
@@ -381,82 +295,14 @@ namespace rex::input::condemned2input {
       last_dy = 0;
       last_add_dx = 0;
       last_add_dy = 0;
-      // Drop stale input edges and timed input chords when overlays take focus.
-      for (auto& [name, bind] : activeBinds) bind.prev = false;
-      forensicWheelWasDown_ = false;
-      grabChordGraceUntil_ = {};
     }
-
-    // No native key dispatch in strict 0.2.1 mode. The MNK device alone
-    // owns every guest button. Do not even poll native command availability
-    // here: that probe was never part of 0.2.1 and can query an inactive
-    // command set while loading a checkpoint.
-    const bool strictMnk = REXCVAR_GET(condemned2_input_legacy_mnk);
-    if (!strictMnk)
-      FlushNativeKeys();
-
-    if (!isDialogOpen) {
-      const bool e = IsNativeBindDown("condemned2_input_use");
-      const bool tools = IsNativeBindDown("condemned2_input_forensics");
-      const bool left = IsNativeBindDown("condemned2_input_primary_fire");
-      const bool right = IsNativeBindDown("condemned2_input_secondary_fire");
-      const uint32_t rawState = (e ? 1u : 0u) | (tools ? 2u : 0u) |
-                                (left ? 4u : 0u) | (right ? 8u : 0u);
-      if (strictMnk) {
-        if (!actionStateSnapshotInitialized_ || rawState != actionStateSnapshot_) {
-          REXLOG_INFO("[c2-mnk-raw] E={} R={} LMB={} RMB={} (strict 0.2.1, no direct actions)",
-                      e, tools, left, right);
-          actionStateSnapshot_ = rawState;
-          actionStateSnapshotInitialized_ = true;
-        }
-      } else {
-        // Native-only fallback keeps the original diagnostics and command set.
-        const uint32_t state =
-            (IsInMenu() ? 1u : 0u) |
-            (IsNativeCommandEnabled(0x57) ? 2u : 0u) |
-            (IsNativeCommandEnabled(0x40) ? 4u : 0u) |
-            (IsNativeCommandEnabled(0x70) ? 8u : 0u) |
-            (e ? 16u : 0u) | (tools ? 32u : 0u) |
-            ((mouse_clicks.isMouseLeft && mouse_clicks.isMouseRight) ? 64u : 0u);
-        if (!actionStateSnapshotInitialized_ || state != actionStateSnapshot_) {
-          REXLOG_INFO("[c2-input-state] hud={} use57={} grab40={} forensicReturn70={} keyUse={} keyTools={} dualTrigger={}",
-                      (state & 1u)!=0, (state & 2u)!=0, (state & 4u)!=0,
-                      (state & 8u)!=0, (state & 16u)!=0, (state & 32u)!=0,
-                      (state & 64u)!=0);
-          actionStateSnapshot_ = state;
-          actionStateSnapshotInitialized_ = true;
-        }
-      }
-    }
-
-    // 0.2.1: this custom device has no gameplay buttons at all in MnK mode.
-    // Do not merge another synthetic A/X/LT/RT on top of the real MNK
-    // driver; its key-down/up events alone are the authoritative pad state.
+    
     //Update controller
     packet_number_++; // Increment input packet number
     if (out_state) {
       out_state->packet_number = packet_number_;
     }
     return X_ERROR_SUCCESS;
-  }
-
-  // Native camera path from the original 0.2.1 custom input driver.
-  // In strict legacy mode no custom game actions are emitted: the SDK's
-  // MnkInputDriver owns every Xbox 360 gameplay button and trigger.
-  void Condemned2InputDriver::UpdateNativeMouseLook() {
-    //Mouse movement
-    float dx = 0.0f, dy = 0.0f;
-    SDL_GetRelativeMouseState(&dx, &dy);
-    double sensitivity = REXCVAR_GET(condemned2_input_mouse_sensitivity);
-    // Mouse look
-    last_dx = dx * sensitivity;
-    last_dy = dy * sensitivity;
-    // Additive mouse delta
-    last_add_dx += last_dx * 0.01f;
-    last_add_dy += -last_dy * 0.01f;
-    last_add_dx = std::clamp(last_add_dx, -1.0, 1.0);
-    last_add_dy = std::clamp(last_add_dy, -1.0, 1.0);
-
   }
 
   void Condemned2InputDriver::PCControls(){
@@ -489,74 +335,88 @@ namespace rex::input::condemned2input {
       !hasMeleeWeapon ? isMouseRightPressed : isMouseLeftPressed, 
       !hasMeleeWeapon ? isMouseLeftPressed : isMouseRightPressed 
     };
-    // The gamepad sends trigger DOWN, HOLD, and UP. Sending only a one-frame
-    // mouse click prevents its dual-trigger (LT+RT) grab/finisher path from
-    // seeing both triggers held together.
-    if(mouse_clicks.isMouseLeft){
+    if(mouse_clicks.isMouseLeftPressed){
       NativeKeyPress({0x47, 0x79, 0x1c});
     }
-    if(mouse_clicks.isMouseRight){
-      NativeKeyPress({0x11, 0x7a});
-    }
     if(mouse_clicks.isMouseRightPressed){
-      NativeKeyPress({0xbc}); // NoteInputTime is an edge, not a held trigger.
-      // Only the active forensic task may accept CancelTask.
-      if (IsNativeCommandEnabled(0x65))
-        NativeKeyPress({0x65});
+      NativeKeyPress({
+        0x11, 0x7a, 0xbc, 
+        0x65 // Cancel investigation
+      });
     }
-    // Real Xbox finisher: LT+RT together. Expose it for keyboard/mouse as
-    // simultaneous LMB+RMB; preserve E/Q as optional contextual aliases.
-    // Dual-trigger grab is a deliberate LMB+RMB chord; send the guest
-    // event unconditionally, even if IsCommandEnabled reports false.
-    // This does not fire for ordinary one-button combat.
-    // The SDK MnK controller already reports LT+RT to the game via
-    // XInputGetState, matching the working 0.2.1 path. Do not also dispatch
-    // an unrelated native Grab command: double delivery changes the game's
-    // interaction state and can cancel an otherwise valid finisher.
-    if (!REXCVAR_GET(condemned2_input_legacy_mnk) &&
-        isMouseLeft && isMouseRight)
-      NativeKeyPress({0x40});
-    UpdateNativeMouseLook();
+    //Mouse movement
+    float dx = 0.0f, dy = 0.0f;
+    SDL_GetRelativeMouseState(&dx, &dy);
+    mouseSensitivity = REXCVAR_GET(condemned2_input_mouse_sensitivity) * (PI / 180.0f);
+    // Last mouse delta
+    last_dx = dx;
+    last_dy = dy;
+    // Additive mouse delta
+    float tuningSensitivity = REXCVAR_GET(condemned2_input_tuning_sensitivity) * (PI / 180.0f);
+    last_add_dx += last_dx * tuningSensitivity;
+    last_add_dy += -last_dy * tuningSensitivity;
+    last_add_dx = std::clamp(last_add_dx, -1.0, 1.0);
+    last_add_dy = std::clamp(last_add_dy, -1.0, 1.0);
 
-    // Only arrow keys and mouse wheel control navigation / forensic choices.
-    // WASD movement MUST NOT inject menu commands (0x82..0x8e) in gameplay,
-    // otherwise changing direction can alter the active forensic command state.
     // Navigation
-    Held({activeBinds["menu_nav_up"]}, {0x82}, wheelY > 0.0f);
-    Held({activeBinds["menu_nav_down"]}, {0x83}, wheelY < 0.0f);
-    Held({activeBinds["menu_nav_right"]}, {0x85, 0x8e} );
-    Held({activeBinds["menu_nav_left"]}, {0x84, 0x8d} );
+    Held({activeBinds["menu_nav_up"], activeBinds["condemned2_input_move_forward"]}, {0x82}, wheelY == 0.0f, wheelY > 0.0f);
+    Held({activeBinds["menu_nav_down"], activeBinds["condemned2_input_move_backward"]}, {0x83}, wheelY == 0.0f, wheelY < 0.0f);
+    Held({activeBinds["menu_nav_right"], activeBinds["condemned2_input_move_right"]}, {0x85, 0x8e} );
+    Held({activeBinds["menu_nav_left"], activeBinds["condemned2_input_move_left"]}, {0x84, 0x8d} );
 
-    // Context-sensitive A actions: the native PC path originally delivered
-    // several A aliases on E/Enter. In #21-25 these were restricted to HUD
-    // menus, which also broke health kits showing an A prompt. They are
-    // different command sets, not duplicate invocations of the same action:
-    // 0x57 = world Use, 0x87 = menu A, 0xa7 = in-game A confirm,
-    // 0xb5/0xb7 = dialogue A, 0x5d = decision A, 0xa3 = terminal A.
-    // IDs come from the reviewed XEX PlayerInput/CPlayerUI action mapping.
-    // Crucially, do NOT inject 0xa6 / 0x5b (Y), or 0xba (B) on E: those
-    // cross-button aliases can activate an unrelated command set.
-    const bool usePressed = Pressed(activeBinds["condemned2_input_use"]);
-    const bool enterPressed = Pressed(activeBinds["menu_enter"]);
-    if (usePressed || enterPressed) {
-      NativeKeyPress({0x87, 0xa7, 0xb5, 0xb7, 0x5d, 0xa3});
-      REXLOG_INFO("[c2-use-aliases] E/Enter -> world A context aliases; hud={}", IsInMenu());
+    //Confirm, Use Commands
+    auto& useBind = activeBinds["condemned2_input_use"];
+    auto& enterMenuBind = activeBinds["menu_enter"];
+    if(IsInMenu()){
+      if(Pressed(useBind) || Pressed(enterMenuBind)){ //buttons |= X_INPUT_GAMEPAD_B;
+        NativeKeyPress({
+          //Submit menu confirm
+          0xa6,
+          0x5b,
+          //Menu confirm
+          0x87,
+          0xb5,
+          0xa7, //In-game menu confirm
+          0xb7, // Used for dialogs in fight club
+          0xba, // Close tutorial dialogs
+          0x5d // Choose investigation choice
+        });
+      }
+    }else{
+      //Menu interaction
+      if(Pressed(useBind) || Pressed(enterMenuBind)){ //buttons |= X_INPUT_GAMEPAD_B;
+        NativeKeyPress({
+          //Submit menu confirm
+          0xa6,
+          0x5b,
+          //Menu confirm
+          0x87,
+          0xb5,
+          0xa7, //In-game menu confirm
+          0xb7, // Used for dialogs in fight club
+          0xba, // Close tutorial dialogs
+          0x57,
+          0x5d // Choose investigation choice
+        });
+      }
+      //Player use action
+      Held({useBind}, {0x57} );
     }
-    // Use is a hold action: scanning and scripted moves require genuine
-    // DOWN/HOLD/UP transitions. Keep the normal XInput A state in parallel.
-    Held({activeBinds["condemned2_input_use"], activeBinds["menu_enter"]}, {0x57});
-
+    
     //Menu back
     if(Pressed(activeBinds["menu_go_back"])){ //buttons |= X_INPUT_GAMEPAD_B;
-      NativeKeyPress({0x88, 0xba}); // menu back; dismiss tutorial
-      if (IsNativeCommandEnabled(0x65)) // cancel only a currently enabled task
-        NativeKeyPress({0x65});
+      NativeKeyPress({
+        0x88,
+        0xba, // Close tutorial dialogs
+        0x65 // Cancel investigation
+      });
     }
 
     //Actions
     if(Pressed(activeBinds["pause_menu"])){ //buttons |= X_INPUT_GAMEPAD_START
       NativeKeyPress({0xd});
     }
+    Held({activeBinds["condemned2_input_objectives"]}, {0x4f, 0x4e} );
     if(Pressed(activeBinds["condemned2_input_flashlight"])){ //buttons |= X_INPUT_GAMEPAD_B;
       NativeKeyPress({0x72,0x8c});
     }
@@ -577,94 +437,43 @@ namespace rex::input::condemned2input {
     }
     if(IsDown(activeBinds["condemned2_input_hook_attacks"])){
       NativeKeyPress({0x42, 0xa8});
-      // CS_Grab / CS_DoubleGrab: only in contexts where the guest enables it.
-      // Do not gate a physical Q action on IsCommandEnabled: the guest
-      // reported false at the exact time the clown finisher was attempted.
-      if (!REXCVAR_GET(condemned2_input_legacy_mnk))
-        NativeKeyPress({0x40});
     }
-    if(!IsDown(activeBinds["condemned2_input_slowmo"]) && activeBinds["condemned2_input_slowmo"].prev){
+
+    //Slowmo
+    auto& slowmoBind = activeBinds["condemned2_input_slowmo"];
+    if(!IsDown(slowmoBind) && slowmoBind.prev){
       _hooks->SendCommandCmd({_hooks->AllocateHeapForString("msg Player (slowmo off)"), 0, 0, 0});
     }
-    if(Pressed(activeBinds["condemned2_input_slowmo"]) ){
+    if(Pressed(slowmoBind) ){
       _hooks->SendCommandCmd({_hooks->AllocateHeapForString("msg Player (slowmo on default)"), 0, 0, 0});
     } 
 
-    // Contextual grab/finisher can also be triggered with the standard E key;
-    // the game chooses the enabled action, while a single mapped key remains
-    // usable for pickup and scripted quick-time interactions.
-    // E remains ordinary Use. Do not synthesize Grab from E; those are
-    // separate actions and E worked for medkits before the A bridge.
-
-    Held({activeBinds["condemned2_input_objectives"]}, {0x4f, 0x4e} );
-    // Native forensic commands were a regression introduced after 0.2.1.
-    // On keyboard, X and the tool-wheel's internal 0x71/0x70 transition were
-    // fired simultaneously, sometimes leaving the game in the wrong command
-    // set and disabling weapon pickup and scripted QTE prompts.
-    //
-    // The legacy path now uses R -> X through the merged XInput state (same
-    // command lifecycle as a real controller). Do not also send tool commands
-    // directly. The older native-only path remains available when legacy MnK
-    // is disabled.
-    if (!REXCVAR_GET(condemned2_input_legacy_mnk)) {
-      if (pendingForensicsReturn_ && !IsNativeBindDown("condemned2_input_forensics")) {
-        NativeKeyPress({0x70});
-        pendingForensicsReturn_ = false;
-      }
-      const bool forensicWasDown = activeBinds["condemned2_input_forensics"].prev;
-      Held({activeBinds["condemned2_input_forensics"]}, {0x74, 0x71});
-      if (forensicWasDown && !IsNativeBindDown("condemned2_input_forensics"))
-        pendingForensicsReturn_ = true;
-    } else {
-      pendingForensicsReturn_ = false;
-      // On a real controller, releasing X closes the forensic wheel; the
-      // guest issues ForensicsReturn (0x70) as part of its context transition.
-      // The native keyboard variant used by the validated input experiments
-      // explicitly sent that transition on key release. Preserve it here
-      // while keeping the SDK's normal X-down/X-up state for R.
-      const bool toolsDown = IsNativeBindDown("condemned2_input_forensics");
-      if (forensicWheelWasDown_ && !toolsDown) {
-        NativeKeyPress({0x70});
-        REXLOG_INFO("[c2-forensic-transition] R released; ForensicsReturn(0x70)");
-      }
-      forensicWheelWasDown_ = toolsDown;
+    //Forensic switch
+    //Depending on how long this button is held, it could either open the forensics tools menu or quick-use your current forensic tool.
+    auto& forensicBind = activeBinds["condemned2_input_forensics"];
+    bool forensicsPressed = forensicBind.prev;
+    Held({forensicBind}, {0x74} );
+    bool isForensicsOpen = IsDown(forensicBind);
+    auto forensicsElapsed = std::chrono::steady_clock::now() - forensicBind.pressTime;
+    if(isForensicsOpen && forensicsElapsed > std::chrono::seconds(2) ){
+      Held({forensicBind}, {0x71} );
+    }else if(!isForensicsOpen && forensicsPressed){
+      NativeKeyPress({0x70});
     }
-    // The camera shutter defaults to Mouse1,E, and zoom to Mouse2,V. Without
-    // command-set checks they also fire during melee, weapon pickup and QTE,
-    // even when forensic-camera mode is inactive. These overlapping controls
-    // must not inject camera actions into ordinary gameplay.
-    const bool cameraShutterPressed = Pressed(activeBinds["condemned2_input_tool_take_picture"]);
-    if (cameraShutterPressed && IsNativeCommandEnabled(0xb9)) {
+
+    //Forensic tools
+    if(Pressed(activeBinds["condemned2_input_tool_take_picture"])){
       NativeKeyPress({0xb9});
     }
-    if (IsNativeCommandEnabled(0x8b) &&
-        IsDown(activeBinds["condemned2_input_zoom"])) {
+    if(IsDown(activeBinds["condemned2_input_zoom"])){
       NativeKeyPress({0x8b});
     }
 
-    // Fast-select 1..4 used to bypass the actual wheel-open/close controller
-    // sequence. That is precisely the input-state loss reported in issues
-    // #66/#71. Disable only these unsafe shortcuts while the stable 0.2.1
-    // X-button path is selected; the forensic tool wheel remains usable via R
-    // and the existing arrow-key navigation.
-    if (!REXCVAR_GET(condemned2_input_legacy_mnk)) {
-      if (Pressed(activeBinds["condemned2_input_tool_uv"])) {
-        NativeKeyPress({0x71,0x90,0x96,0xa0});
-        pendingForensicsReturn_ = true;
-      }
-      if (Pressed(activeBinds["condemned2_input_tool_camera"])) {
-        NativeKeyPress({0x71,0x98,0x9e,0xa0});
-        pendingForensicsReturn_ = true;
-      }
-      if (Pressed(activeBinds["condemned2_input_tool_spectrometer"])) {
-        NativeKeyPress({0x74,0x71,0x97,0xa1});
-        pendingForensicsReturn_ = true;
-      }
-      if (Pressed(activeBinds["condemned2_input_tool_gps"])) {
-        NativeKeyPress({0x74,0x71,0x99,0x9f});
-        pendingForensicsReturn_ = true;
-      }
-    }
+    // Quick-swap (Custom controls)
+    Held({activeBinds["condemned2_input_tool_uv"]}, {0x71,0x90,0x96,0xa0} );
+    Held({activeBinds["condemned2_input_tool_camera"]}, {0x71,0x98,0x9e,0xa0} );
+    Held({activeBinds["condemned2_input_tool_spectrometer"]}, {0x74,0x71,0x97,0xa1} );
+    Held({activeBinds["condemned2_input_tool_gps"]}, {0x74,0x71,0x99,0x9f} );
     g_condemned2_input_driver->SetMouseWheelY(0); //Reset wheel after a frame.
   }
   
@@ -720,87 +529,44 @@ namespace rex::input::condemned2input {
     bool held = !isDialogOpen && IsDown(b);
     bool edge = held && !b.prev;
     b.prev = held;
+    if (edge) {
+      b.pressTime = std::chrono::steady_clock::now();
+    }
     return edge;
   }
 
-  // The guest must receive a KeyDown once, KeyHold while held, and KeyUp on release.
-  // Don't consume Pressed() edges here: other actions can already have examined E.
-  void Condemned2InputDriver::Held(std::initializer_list<std::reference_wrapper<Bind>> binds,
-                                  std::vector<int32_t> keycodes, bool pressed) {
-    bool active = pressed;
-    for (Bind& bind : binds) {
-      const bool isDown = IsDown(bind);
-      bind.prev = isDown;
-      active = active || isDown;
-    }
-    if (active) NativeKeyPress(std::move(keycodes));
-  }
-
-  // Preserve the original order of the native input codes for forensic quick-swap/QTE.
-  void Condemned2InputDriver::NativeKeyPress(std::vector<int32_t> keycodes) {
-    for (int32_t key : keycodes) {
-      if (std::find(requestedNativeKeys.begin(), requestedNativeKeys.end(), key) == requestedNativeKeys.end())
-        requestedNativeKeys.push_back(key);
+  void Condemned2InputDriver::Held( std::initializer_list<std::reference_wrapper<Bind>> binds, std::vector<int32_t> keycodes, bool down, bool pressed) {
+    for ( Bind& bind : binds) {
+      bool capturedBind = false;
+      if((!IsDown(bind) || down ) && bind.prev){
+        NativeKeyPress(keycodes, true);
+        capturedBind = true;
+      }
+      if(Pressed(bind) || pressed ){
+        NativeKeyPress(keycodes);
+        bind.prev = true;
+        capturedBind = true;
+      } 
+      if(capturedBind) return;
     }
   }
 
-  void Condemned2InputDriver::FlushNativeKeys() {
-    const uint32_t keyManager = GetInputManager();
-    // Release keys absent from this update, including forensic tools and one-shot taps.
-    for (int32_t key : activeNativeKeys) {
-      if (std::find(requestedNativeKeys.begin(), requestedNativeKeys.end(), key) == requestedNativeKeys.end()) {
-        if (key == 0x57 || (REXCVAR_GET(condemned2_input_trace_use_grab) && key == 0x40))
-          REXLOG_INFO("[c2-native-action] UP id={:#x}", key);
-        ReleaseBind(keyManager, key);
+  // Native key presses in Condemned 2!
+  void Condemned2InputDriver::NativeKeyPress(std::vector<int32_t> keycodes, bool release ){
+    uint32_t keyManager = GetInputManager();
+    for (int32_t k : keycodes) {
+      PressBind(keyManager, k, 0x0, 0x0, 0x0, 0x0);
+      if(!release){
+        HoldBind(keyManager, k);
       }
     }
-    for (int32_t key : requestedNativeKeys) {
-      if (std::find(activeNativeKeys.begin(), activeNativeKeys.end(), key) == activeNativeKeys.end()) {
-        if (key == 0x57 || (REXCVAR_GET(condemned2_input_trace_use_grab) && key == 0x40))
-          REXLOG_INFO("[c2-native-action] DOWN id={:#x} enabled_hint={}", key, IsNativeCommandEnabled(key));
-        PressBind(keyManager, key);
-      }
-      HoldBind(keyManager, key);
-    }
-    activeNativeKeys.swap(requestedNativeKeys);
-    requestedNativeKeys.clear();
   }
   
-  bool Condemned2InputDriver::IsNativeCommandEnabled(uint32_t action) {
-    return (IsCommandEnabled(GetInputManager(), action) & 0xff) != 0;
-  }
-
-  // Query the original native keyboard state without copying the entire bind map.
-  bool Condemned2InputDriver::IsNativeBindDown(const char* bindName) {
-    const auto it = activeBinds.find(bindName);
-    return it != activeBinds.end() && IsDown(it->second);
-  }
-
   uint32_t Condemned2InputDriver::GetInputManager(){
-    // Prefer the input manager pointer observed in the guest's own GetButton
-    // calls. The old cvar-only guess is wrong if the RexCRT layout and cvar
-    // initialization order diverge; injected Use/Grab then reach a different
-    // manager than the one the game polls. Only accept the two already
-    // established Condemned 2 manager addresses (never arbitrary pointers).
-    const uint32_t live = observedInputManager_.load(std::memory_order_relaxed);
-    if (live == kInputManager || live == kInputManagerCRT)
-      return live;
-    return isUsingCRT ? kInputManagerCRT : kInputManager;
-  }
-
-  void Condemned2InputDriver::ObserveInputManager(uint32_t candidate, uint32_t action) {
-    if (action != 0x57 && action != 0x40)
-      return;
-    if (candidate != kInputManager && candidate != kInputManagerCRT)
-      return;
-    // Lock the first verified guest manager for this session; do not oscillate
-    // between UI and player contexts if the guest also polls the other layout.
-    uint32_t unknown = 0;
-    if (observedInputManager_.compare_exchange_strong(unknown, candidate,
-                                                      std::memory_order_relaxed)) {
-      REXLOG_INFO("[c2-input-manager] game GetButton({:#x}) uses {:#x}; legacy guessed {:#x}",
-                  action, candidate, isUsingCRT ? kInputManagerCRT : kInputManager);
+    if(isUsingCRT){
+      return kInputManagerCRT;
     }
+    return kInputManager;
   }
 
   bool Condemned2InputDriver::IsInMenu() { 
@@ -831,7 +597,7 @@ namespace rex::input::condemned2input {
     }
   }
   
-  double GetAxisOverrideValue(uint32_t btn){
+  double GetAxisOverrideValue(uint32_t btn, float currentValue){
     //Left Stick Handling / Movement Velocity
     std::pair<double,double> moveVel = g_condemned2_input_driver->MoveVel();
     if (btn == 0x2 && moveVel.second != 0){
@@ -846,11 +612,7 @@ namespace rex::input::condemned2input {
       return 0;
     }
 
-    if (REXCVAR_GET(condemned2_input_legacy_mnk) &&
-        btn != 0x0b && btn != 0x0c && btn != 0x16 && btn != 0x17 &&
-        btn != 0x7b && btn != 0x7c)
-      return 0; // Original guest controller: do not override punches / QTE.
-    // Mouse analog overrides are used only in native-only input mode.
+    // Mouse Button Handling
     MouseBind mouseClick = g_condemned2_input_driver->MouseClick();
     if(mouseClick.isMouseMiddle && g_condemned2_input_driver->IsUsingMeleeWeapon()){ //Alt block
       if (btn == 0x79 || btn == 0x7a){
@@ -859,15 +621,13 @@ namespace rex::input::condemned2input {
     }
     else if (btn == 0x79 || btn == 0x47){ // Left click
       return mouseClick.isMouseLeft;
-    }else if (btn == 0x7a){ // Right click / combo button
+    }else if (btn == 0x7a || btn == 0x65){ // Right click
       return mouseClick.isMouseRight;
-    }else if (btn == 0x65){ // CancelTask only if the guest explicitly enables it
-      return g_condemned2_input_driver->IsNativeCommandEnabled(0x65) && mouseClick.isMouseRight;
     }
 
     // Radio/TV Antenna Tuning
     // This uses a soft additive mouse input so users can feel slight weight in adjusting antennas.
-    if( g_condemned2_input_driver->IsUsingTuningControls() ){
+    if( g_condemned2_input_driver->IsUsingTuningControls() && currentValue == 0.0f ){
       std::pair<double,double> accumMouse = g_condemned2_input_driver->AccumMouse();
       if (btn == 0x7B) {
         return accumMouse.first;
@@ -883,58 +643,35 @@ namespace rex::input::condemned2input {
     // Mouse Look
     // Overriding right stick input with raw mouse input
     std::pair<double,double> rawMouse = g_condemned2_input_driver->RawMouse();
+    double mouseSensitivity = g_condemned2_input_driver->GetMouseSensitivity();
     if (g_condemned2_input_driver->GetMouseLookType() == MouseLookType::NATIVE){ // Restored dev/unused mouse look function in Condemned 2 ( which introduces its own smoothing and sensitivity )
       if ( btn == 0x17 || btn == 0x16 ){
         return 0;
       }
       if (btn == 0xC ) {
-        return rawMouse.first;
+        return rawMouse.first * mouseSensitivity;
       }
       if (btn == 0xB ) {
-        return rawMouse.second;
+        return rawMouse.second * mouseSensitivity;
       }
     }else if (g_condemned2_input_driver->GetMouseLookType() == MouseLookType::MIXED){ // Overrides gamepad input to use raw mouse input, retaining more subtle behaviors from the gamepad input.
       if ( btn == 0xC || btn == 0xB ){
         return 0;
       }
       if (btn == 0x17 ) {
-        return rawMouse.first;
+        return rawMouse.first * mouseSensitivity;
       }
       if (btn == 0x16 ) {
-        return rawMouse.second;
+        return rawMouse.second * mouseSensitivity;
       }
     }
     return 0;
   }
 
   double GetButtonOverrideValue(uint32_t btn){
-    if (REXCVAR_GET(condemned2_input_legacy_mnk))
-      return 0; // Guest XInput buttons only, as in working 0.2.1.
-    // World interaction is a keyboard action, not a mouse-look action.
-    // After calling the guest's Input_GetButton, supply 0x57 when E is held
-    // irrespective of legacy_mnk or mouse-look mode. Original gamepad state
-    // remains untouched when the host keyboard key is not down.
-    if (btn == 0x57 && g_condemned2_input_driver->IsUsingPCControls() &&
-        g_condemned2_input_driver->IsNativeBindDown("condemned2_input_use"))
-      return 1.0;
-    if (g_condemned2_input_driver->GetMouseLookType() == MouseLookType::DISABLED
-    || !g_condemned2_input_driver->IsUsingPCControls() )
+    if (g_condemned2_input_driver->GetMouseLookType() == MouseLookType::DISABLED  // No changes if disabled.
+    || !g_condemned2_input_driver->IsUsingPCControls() ) // Are using the gamepad?
       return 0;
-
-    // v0.2.1 received both keyboard edge events and button polling from the
-    // SDK's MnkInputDriver. The v0.6 native input driver only injected events,
-    // so the original Input_GetButton path never saw E / scripted grabs.
-    // Return digital button levels for the same guest commands as key events.
-    // Unlike a permission/availability hint, an explicit player button
-    // press must be delivered to the engine even if Input_IsCommandEnabled
-    // currently says false (as seen throughout mission_04 in log 030).
-    // With the v0.2.1 keyboard controller restored, use the guest's original
-    // button state instead of overlaying a separate native command state.
-    if (!REXCVAR_GET(condemned2_input_legacy_mnk) && btn == 0x40) {
-      const MouseBind triggers = g_condemned2_input_driver->MouseClick();
-      return (triggers.isMouseLeft && triggers.isMouseRight) ||
-             g_condemned2_input_driver->IsNativeBindDown("condemned2_input_hook_attacks");
-    }
 
     //Sprint
     if( btn == 0x10 && g_condemned2_input_driver->GetActiveBinds()["condemned2_input_sprint"].prev){
@@ -952,11 +689,7 @@ namespace rex::input::condemned2input {
     if(g_condemned2_input_driver->IsUsingMeleeWeapon()){ //Alt block
       isMiddleClicked = mouseClick.isMouseMiddle;
     }
-    if (btn == 0x65) {
-      return g_condemned2_input_driver->IsNativeCommandEnabled(0x65)
-        && (mouseClick.isMouseRight || mouseClick.isMouseRightPressed);
-    }
-    if (btn == 0x11 || btn == 0x7a ) {
+    if (btn == 0x11 || btn == 0x65 || btn == 0x7a ) {
       return mouseClick.isMouseRight || mouseClick.isMouseRightPressed || isMiddleClicked;
     }else if(btn == 0x1c || btn == 0x47 || btn == 0x79){ 
       return mouseClick.isMouseLeft || mouseClick.isMouseLeftPressed || isMiddleClicked;
@@ -967,8 +700,8 @@ namespace rex::input::condemned2input {
   //Input Event Functions
   REX_HOOK_RAW(Input_GetAxis) {
     uint32_t newID = ctx.r4.u32;
-    double newValue = GetAxisOverrideValue(newID);
     __imp__Input_GetAxis(ctx, base);
+    double newValue = GetAxisOverrideValue(newID, ctx.f1.f64);
     if( newValue != 0 ){
       ctx.f1.f64 = newValue;
     }
@@ -978,7 +711,7 @@ namespace rex::input::condemned2input {
   }
   REX_HOOK_RAW(Input_KeyDown){
     if(g_condemned2_input_driver->IsDebugging()){
-      REXLOG_INFO("[condemned2_input][Input_KeyDown] {:#x} {:#x}", ctx.r3.u32, ctx.r4.u64);
+      REXLOG_INFO("[condemned2_input][Input_KeyDown] {:#x} {:#x} {:#x} {:#x} {:#x} {:#x}", ctx.r3.u32, ctx.r4.u64, ctx.r5.u64, ctx.r6.u64, ctx.r7.u64, ctx.r8.u64);
     }
     __imp__Input_KeyDown(ctx, base);
   }
@@ -997,49 +730,20 @@ namespace rex::input::condemned2input {
   REX_HOOK_RAW(Input_GetButton){
     uint32_t temp = ctx.r3.u32;
     uint32_t tempB = ctx.r4.u32;
-    if (g_condemned2_input_driver)
-      g_condemned2_input_driver->ObserveInputManager(temp, tempB);
     __imp__Input_GetButton(ctx, base);
-    const uint32_t originalValue = ctx.r3.u32;
     double newValue = GetButtonOverrideValue(tempB);
-    // In strict 0.2.1 mode the original guest polls controller actions.
-    // Trace only changes in physical E and LT+RT while the game is polling
-    // Use/Grab; a key detected by SDL but never observed here is actionable
-    // evidence of an upstream controller-to-game routing regression.
-    if (REXCVAR_GET(condemned2_input_legacy_mnk) &&
-        g_condemned2_input_driver && (tempB == 0x57 || tempB == 0x40)) {
-      const bool keyUse = g_condemned2_input_driver->IsNativeBindDown("condemned2_input_use");
-      const bool left = g_condemned2_input_driver->IsNativeBindDown("condemned2_input_primary_fire");
-      const bool right = g_condemned2_input_driver->IsNativeBindDown("condemned2_input_secondary_fire");
-      const uint32_t state = (keyUse ? 1u : 0u) | ((left && right) ? 2u : 0u);
-      static std::atomic<uint32_t> lastUseState{0xffffffffu};
-      static std::atomic<uint32_t> lastGrabState{0xffffffffu};
-      auto& prior = tempB == 0x57 ? lastUseState : lastGrabState;
-      const uint32_t before = prior.exchange(state, std::memory_order_relaxed);
-      if (before != state) {
-        REXLOG_INFO("[c2-guest-button] action={:#x} E={} LT+RT={} result={:#x}",
-                    tempB, keyUse, left && right, ctx.r3.u64);
-      }
-    }
     if(newValue != 0){
-      ctx.r3.u64 = static_cast<uint64_t>(newValue);
-      if (REXCVAR_GET(condemned2_input_trace_use_grab) &&
-          (tempB == 0x57 || tempB == 0x40))
-        REXLOG_INFO("[c2-poll-action] id={:#x} original={} override={}", tempB, originalValue, ctx.r3.u32);
+      ctx.r3.u64 = newValue;
     }
     if(g_condemned2_input_driver->IsDebuggingFrames()){
       REXLOG_INFO("[condemned2_input][Input_GetButton] {:#x} {:#x} {:#x} {}", temp, tempB, ctx.lr, ctx.r3.u64);
     }
   }
   REX_HOOK_RAW(Input_PlayerInput){
-    const uint32_t id = ctx.r4.u32;
     if(g_condemned2_input_driver->IsDebugging()){
-      REXLOG_INFO("[condemned2_input][Input_PlayerInput] {:#x} {:#x}", ctx.r3.u64, id);
+      REXLOG_INFO("[condemned2_input][Input_PlayerInput] {:#x} {:#x}", ctx.r3.u64, ctx.r4.u32);
     }
     __imp__Input_PlayerInput(ctx, base);
-    if (REXCVAR_GET(condemned2_input_trace_use_grab) &&
-        (id == 0x57 || id == 0x40))
-      REXLOG_INFO("[c2-player-action] id={:#x} result={:#x}", id, ctx.r3.u32);
   }
   // Radio & TV Antenna Adjustment Function
   REX_HOOK_RAW(TvAntennaAdjust) {
@@ -1077,4 +781,13 @@ bool Mouse_SensitivityCurve(PPCRegister& param_1, PPCRegister& param_2) {
 
     param_1.f64 = param_2.f64;
     return true;     
+}
+
+// Instead of using the game's native MouseSensitity, we're midhooking our own sensitivity.
+void Mouse_SensitivityCurveNative(PPCRegister& param_1) {
+    if (rex::input::condemned2input::g_condemned2_input_driver->GetMouseLookType() == rex::input::condemned2input::MouseLookType::DISABLED
+    || !rex::input::condemned2input::g_condemned2_input_driver->IsUsingPCControls())
+      return;
+
+    param_1.f64 = rex::input::condemned2input::g_condemned2_input_driver->GetMouseSensitivity();
 }
