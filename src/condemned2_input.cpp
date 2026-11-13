@@ -983,6 +983,25 @@ namespace rex::input::condemned2input {
     __imp__Input_GetButton(ctx, base);
     const uint32_t originalValue = ctx.r3.u32;
     double newValue = GetButtonOverrideValue(tempB);
+    // In strict 0.2.1 mode the original guest polls controller actions.
+    // Trace only changes in physical E and LT+RT while the game is polling
+    // Use/Grab; a key detected by SDL but never observed here is actionable
+    // evidence of an upstream controller-to-game routing regression.
+    if (REXCVAR_GET(condemned2_input_legacy_mnk) &&
+        g_condemned2_input_driver && (tempB == 0x57 || tempB == 0x40)) {
+      const bool keyUse = g_condemned2_input_driver->IsNativeBindDown("condemned2_input_use");
+      const bool left = g_condemned2_input_driver->IsNativeBindDown("condemned2_input_primary_fire");
+      const bool right = g_condemned2_input_driver->IsNativeBindDown("condemned2_input_secondary_fire");
+      const uint32_t state = (keyUse ? 1u : 0u) | ((left && right) ? 2u : 0u);
+      static std::atomic<uint32_t> lastUseState{0xffffffffu};
+      static std::atomic<uint32_t> lastGrabState{0xffffffffu};
+      auto& prior = tempB == 0x57 ? lastUseState : lastGrabState;
+      const uint32_t before = prior.exchange(state, std::memory_order_relaxed);
+      if (before != state) {
+        REXLOG_INFO("[c2-guest-button] action={:#x} E={} LT+RT={} result={:#x}",
+                    tempB, keyUse, left && right, ctx.r3.u64);
+      }
+    }
     if(newValue != 0){
       ctx.r3.u64 = static_cast<uint64_t>(newValue);
       if (REXCVAR_GET(condemned2_input_trace_use_grab) &&
