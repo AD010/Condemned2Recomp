@@ -33,7 +33,7 @@ require("pressTime = std::chrono::steady_clock::now()" in input_cpp and
 require('Held({useBind}, {0x57} )' in input_cpp,
         "Original Use key hold/release path is missing")
 require('NativeKeyPress({0x47, 0x79, 0x1c})' in input_cpp and
-        'NativeKeyPress({0x11, 0x7a})' in input_cpp,
+        '0x11, 0x7a, 0xbc' in input_cpp,
         "Original mouse attack commands were changed")
 require("MnkInputDriver" not in input_cpp,
         "Do not overlay the experimental 0.2.1 MNK keyboard driver on the newly-fixed upstream native input")
