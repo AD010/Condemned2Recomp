@@ -62,6 +62,7 @@ namespace rex::input::condemned2input{
          uint32_t GetInputManager();
 
          bool IsAnyDialogOpen();
+         bool IsInputDialogOpen() const { return isDialogOpen; }
          std::unordered_map<std::string, ImGuiWindow*> GetActiveWindows() { return activeWindows; }
 
          Bind ParseBind(const std::string& s);
