@@ -313,6 +313,60 @@ namespace rex::input::condemned2input {
     return X_ERROR_SUCCESS;
   }
 
+  void Condemned2InputDriver::ReleaseCapturedInputs() {
+    // Native input is explicitly stateful: F4/launcher may capture focus
+    // between DOWN and UP. Never leave old game actions held in the guest.
+    if (grabChordActive_) {
+      ActivateBind({ActionID::PLAYER_GRAB}, true);
+      grabChordActive_ = false;
+    }
+    if (useHeld_) {
+      ActivateBind(heldUseActions_, true);
+      heldUseActions_.clear();
+      useHeld_ = false;
+    }
+    auto releaseHeld = [this](const char* name, std::vector<int32_t> actions) {
+      auto it = activeBinds.find(name);
+      if (it == activeBinds.end() || !it->second.isHeld) return false;
+      ActivateBind(actions, true);
+      it->second.isHeld = false;
+      return true;
+    };
+    bool forensic = releaseHeld("condemned2_input_forensics",
+                               {ActionID::FORENSICS_HOLD});
+    if (forensicsPanelOpen_) {
+      ActivateBind({ActionID::FORENSICS_OPEN}, true);
+      forensic = true;
+      forensicsPanelOpen_ = false;
+    }
+    forensic |= releaseHeld("condemned2_input_tool_uv",
+                            {ActionID::FORENSICS_OPEN, 0x90, 0x96, 0xa0});
+    forensic |= releaseHeld("condemned2_input_tool_camera",
+                            {ActionID::FORENSICS_OPEN, 0x98, 0x9e, 0xa0});
+    forensic |= releaseHeld("condemned2_input_tool_spectrometer",
+                            {ActionID::FORENSICS_HOLD, ActionID::FORENSICS_OPEN, 0x97, 0xa1});
+    forensic |= releaseHeld("condemned2_input_tool_gps",
+                            {ActionID::FORENSICS_HOLD, ActionID::FORENSICS_OPEN, 0x99, 0x9f});
+    if (forensic) {
+      ActivateBind({ActionID::FORENSICS_QUICK});
+      REXLOG_INFO("[c2-forensics] F4/dialog: tools released, guest forensic context closed");
+    }
+    releaseHeld("condemned2_input_sprint", {ActionID::PLAYER_SPRINT});
+    releaseHeld("condemned2_input_objectives",
+                {ActionID::OBJECTIVES_BEGIN, ActionID::OBJECTIVES_END});
+    releaseHeld("menu_nav_up", {ActionID::MENU_NAV_UP});
+    releaseHeld("menu_nav_down", {ActionID::MENU_NAV_DOWN});
+    releaseHeld("menu_nav_left", {ActionID::MENU_NAV_LEFT, ActionID::MENU_NAV_CAT_LEFT});
+    releaseHeld("menu_nav_right", {ActionID::MENU_NAV_RIGHT, ActionID::MENU_NAV_CAT_RIGHT});
+    releaseHeld("condemned2_input_move_forward", {ActionID::MENU_NAV_UP});
+    releaseHeld("condemned2_input_move_backward", {ActionID::MENU_NAV_DOWN});
+    releaseHeld("condemned2_input_move_left", {ActionID::MENU_NAV_LEFT, ActionID::MENU_NAV_CAT_LEFT});
+    releaseHeld("condemned2_input_move_right", {ActionID::MENU_NAV_RIGHT, ActionID::MENU_NAV_CAT_RIGHT});
+    for (auto& [name, bind] : activeBinds) bind.isHeld = false;
+    mouse_clicks = {};
+    wheelY = 0.0f;
+  }
+
   void Condemned2InputDriver::PCControls(){
     //Left Stick/Movement
     double lx = 0;
@@ -470,21 +524,33 @@ namespace rex::input::condemned2input {
       ActivateBind({ActionID::ZOOM});
     }
 
-    // Quick-swap (Custom controls)
-    HoldBind({activeBinds["condemned2_input_tool_uv"]}, {
-      ActionID::FORENSICS_OPEN,0x90,0x96,0xa0
-    } );
-    HoldBind({activeBinds["condemned2_input_tool_camera"]}, {
-      ActionID::FORENSICS_OPEN,0x98,0x9e,0xa0
-    } );
-    HoldBind({activeBinds["condemned2_input_tool_spectrometer"]}, {
-      ActionID::FORENSICS_HOLD,
-      ActionID::FORENSICS_OPEN,0x97,0xa1
-    } );
-    HoldBind({activeBinds["condemned2_input_tool_gps"]}, {
-      ActionID::FORENSICS_HOLD,
-      ActionID::FORENSICS_OPEN,0x99,0x9f
-    } );
+    // The quick-tool selection must close the forensic panel on key UP.
+    // A simple HoldBind would release held aliases but never issue 0x70,
+    // potentially suppressing weapon pickup prompts until a level restart.
+    auto quickTool = [this](const char* name, std::vector<int32_t> actions,
+                            const char* label) {
+      Bind& b = activeBinds[name];
+      const bool held = IsBindDown(b);
+      if (held && !b.isHeld) {
+        b.isHeld = true;
+        b.pressTime = std::chrono::steady_clock::now();
+        ActivateBind(actions);
+        REXLOG_INFO("[c2-quicktool] {} DOWN", label);
+      } else if (!held && b.isHeld) {
+        b.isHeld = false;
+        ActivateBind(actions, true);
+        ActivateBind({ActionID::FORENSICS_QUICK});
+        REXLOG_INFO("[c2-quicktool] {} UP; returned to normal context", label);
+      }
+    };
+    quickTool("condemned2_input_tool_uv",
+              {ActionID::FORENSICS_OPEN, 0x90, 0x96, 0xa0}, "UV");
+    quickTool("condemned2_input_tool_camera",
+              {ActionID::FORENSICS_OPEN, 0x98, 0x9e, 0xa0}, "Camera");
+    quickTool("condemned2_input_tool_spectrometer",
+              {ActionID::FORENSICS_HOLD, ActionID::FORENSICS_OPEN, 0x97, 0xa1}, "Spectrometer");
+    quickTool("condemned2_input_tool_gps",
+              {ActionID::FORENSICS_HOLD, ActionID::FORENSICS_OPEN, 0x99, 0x9f}, "GPS");
     g_condemned2_input_driver->SetMouseWheelY(0); //Reset wheel after a frame.
   }
   
