@@ -406,6 +406,12 @@ namespace rex::input::condemned2input {
     const bool usePressed = Pressed(useBind);
     const bool enterPressed = Pressed(enterMenuBind);
     const bool inMenu = IsInMenu();
+    if (usePressed || enterPressed) {
+      REXLOG_INFO("[c2-world-use] E_pressed={} Enter_pressed={} in_menu={} use57_enabled_hint={} grab40_enabled_hint={}",
+                  usePressed, enterPressed, inMenu,
+                  (IsCommandEnabled(GetInputManager(), 0x57) & 0xff) != 0,
+                  (IsCommandEnabled(GetInputManager(), 0x40) & 0xff) != 0);
+    }
     if (inMenu) {
       if (usePressed || enterPressed) {
         NativeKeyPress({0xa6, 0x5b, 0x87, 0xb5, 0xa7, 0xb7, 0xba, 0x5d});
@@ -708,9 +714,8 @@ namespace rex::input::condemned2input {
     // Grab is a controller action, not a mouse-look axis. Let the guest
     // poll it as an actual LT+RT chord, even if native camera is disabled.
     if (btn == 0x40 && g_condemned2_input_driver->IsUsingPCControls()) {
-      auto binds = g_condemned2_input_driver->GetActiveBinds();
-      return g_condemned2_input_driver->IsDown(binds["condemned2_input_primary_fire"]) &&
-             g_condemned2_input_driver->IsDown(binds["condemned2_input_secondary_fire"]);
+      return g_condemned2_input_driver->IsNativeBindDown("condemned2_input_primary_fire") &&
+             g_condemned2_input_driver->IsNativeBindDown("condemned2_input_secondary_fire");
     }
     if (g_condemned2_input_driver->GetMouseLookType() == MouseLookType::DISABLED  // No changes if disabled.
     || !g_condemned2_input_driver->IsUsingPCControls() ) // Are using the gamepad?
@@ -807,7 +812,13 @@ namespace rex::input::condemned2input {
   // Checks if we're in a menu or not! This does not count in-game menus for investigations or fight club!
   REX_HOOK_RAW(Input_InHud){
     __imp__Input_InHud(ctx,base);
-    g_condemned2_input_driver->SetMenuMode(ctx.r3.u32);
+    const bool newHud = ctx.r3.u32 != 0;
+    const bool oldHud = g_condemned2_input_driver->IsInMenu();
+    g_condemned2_input_driver->SetMenuMode(newHud);
+    if (newHud != oldHud) {
+      REXLOG_INFO("[c2-input-hud] Input_InHud changed {} -> {}",
+                  oldHud, newHud);
+    }
   }
   // Handles on attack landed events for player and NPCs.
   REX_HOOK_RAW(Input_OnAttackLanded){
