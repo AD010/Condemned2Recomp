@@ -8,7 +8,7 @@ name: Condemned 2 TRUE Windows x64 Recomp (private inputs and output)
 # never launch builds, upload artifacts, or incur runner work automatically.
 on:
   workflow_dispatch:
-  # One-shot release explicitly authorized by user; revert immediately after scheduling.
+  # User-authorized single Win64 release from main; return to manual-only after dispatch.
   push:
     branches:
       - main
