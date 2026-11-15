@@ -137,7 +137,7 @@ $revision = (& git -C $SourceRoot rev-parse --short=12 HEAD | Select-Object -Fir
 $buildInfo = @"
 Condemned 2 Recomp Windows x64 REAL SOURCE BUILD
 Public source: AD010/Condemned2Recomp
-Branch: fix/input-weapon-pickup-qte-060
+Branch: main
 Commit: $revision
 Base upstream: psxrestore/Condemned2Recomp 47b65086408083f2430eab0f19ea9edbeaaafe39 (2026-11-13).
 Input rewrite: upstream 680b7bc with cumulative mouse, action IDs and A/Use.
