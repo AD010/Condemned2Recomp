@@ -136,8 +136,9 @@ require("on:\n  workflow_dispatch:" in workflow,
         "Existing workflow_dispatch trigger is required")
 if "\n  push:" in workflow:
     require(contains_all(workflow,
-                         "      - fix/input-weapon-pickup-qte-060",
+                         "    branches:",
+                         "      - main",
                          "      - '.github/workflows/build-input-hotfix.yml'") and
             "      - 'src/condemned2_input.cpp'" not in workflow,
-            "Temporary user-authorized CI trigger may target ONLY this workflow file")
+            "Temporary user-authorized CI trigger may target ONLY main and this workflow file")
 print("PASS: upstream 47b6508 input+UI, SDK 546a082a, A Use, grab QTE, forensic UP, HUD")
